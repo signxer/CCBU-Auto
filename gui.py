@@ -820,28 +820,29 @@ class DashboardScreen(QWidget):
             await page.wait_for_timeout(5000)
 
             # 标签筛选：总是询问用户
+            tags_by_category = {}
             try:
-                tags_by_category = await learner.get_available_tags(page)
+                tags_by_category = await learner.get_available_tags(page) or {}
                 if tags_by_category:
                     tag_count = sum(len(v) for v in tags_by_category.values())
                     log(f"发现 {tag_count} 个标签", "blue")
-
-                    if cfg_tags:
-                        # 有已保存标签，询问用户
-                        self._tag_event.clear()
-                        thread.tag_confirm_signal.emit(cfg_tags, tags_by_category)
-                        await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
-                        cfg_tags = list(getattr(win, "cfg_tags", []))
-                    else:
-                        # 无已保存标签，直接弹选择框
-                        self._tag_event.clear()
-                        thread.tag_request_signal.emit(tags_by_category)
-                        await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
-                        cfg_tags = list(getattr(win, "cfg_tags", []))
-
-                    log(f"标签: {', '.join(cfg_tags)}" if cfg_tags else "未选择标签，学习全部", "green" if cfg_tags else "yellow")
             except Exception as e:
                 log(f"标签加载失败: {e}", "yellow")
+
+            if cfg_tags:
+                # 有已保存标签，询问用户
+                self._tag_event.clear()
+                thread.tag_confirm_signal.emit(cfg_tags, tags_by_category)
+                await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
+                cfg_tags = list(getattr(win, "cfg_tags", []))
+            elif tags_by_category:
+                # 无已保存标签，直接弹选择框
+                self._tag_event.clear()
+                thread.tag_request_signal.emit(tags_by_category)
+                await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
+                cfg_tags = list(getattr(win, "cfg_tags", []))
+
+            log(f"标签: {', '.join(cfg_tags)}" if cfg_tags else "未选择标签，学习全部", "green" if cfg_tags else "yellow")
 
             if cfg_tags:
                 learner.tags_to_learn = cfg_tags
