@@ -1797,15 +1797,31 @@ class CCBULearner:
                         btn = cp.locator(f"text={kw}").first
                         if await btn.count() > 0 and await btn.is_visible():
                             console.print(f"  需要报名，点击「{kw}」", style="blue")
+                            old_url = cp.url
                             await btn.click()
-                            await cp.wait_for_timeout(5000)
+                            # 等待页面跳转（URL变化或按钮消失）
+                            for _ in range(10):
+                                await cp.wait_for_timeout(2000)
+                                new_url = cp.url
+                                if new_url != old_url:
+                                    debug(f"  报名后URL跳转: {new_url[:80]}")
+                                    break
+                                # 检查按钮是否已消失（有些报名不跳转URL）
+                                try:
+                                    still_visible = await cp.locator(f"text={kw}").first.is_visible(timeout=1000)
+                                    if not still_visible:
+                                        break
+                                except:
+                                    break
+                            await cp.wait_for_load_state("networkidle", timeout=15000)
+                            await cp.wait_for_timeout(3000)
                             need_enroll = True
                             break
                     except:
                         pass
 
-                # 报名后重新导航到详情页
-                if need_enroll:
+                # 报名后如果URL没变，重新导航到详情页
+                if need_enroll and "/myworkshop/" not in cp.url:
                     try:
                         await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
                         await cp.wait_for_timeout(3000)
