@@ -1410,6 +1410,19 @@ class CCBULearner:
                 debug("等待课程表格超时")
             await page.wait_for_timeout(2000)
 
+            # 检查页面是否加载了课程表格
+            row_count = await page.locator("tr.text-center").count()
+            if row_count == 0:
+                # 表格没加载出来，打印页面关键信息帮助排查
+                try:
+                    url_now = page.url
+                    body_text = await page.locator("body").inner_text(timeout=3000)
+                    # 只取前500字符避免刷屏
+                    debug(f"  页面无课程表格, URL: {url_now}")
+                    debug(f"  页面内容: {body_text[:500]}")
+                except:
+                    pass
+
             rows_data = await page.evaluate("""() => {
                 const results = [];
                 document.querySelectorAll('tr.text-center').forEach(tr => {
@@ -1834,10 +1847,15 @@ class CCBULearner:
                     if attempt > 0:
                         console.print(f"  第 {attempt+1} 次获取课程...", style="yellow")
                         try:
-                            await cp.reload(wait_until="networkidle")
-                            await cp.wait_for_timeout(5000)
+                            # 重新导航而非简单reload，确保SPA路由刷新
+                            await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
+                            await cp.wait_for_timeout(3000)
                         except:
-                            pass
+                            try:
+                                await cp.reload(wait_until="networkidle", timeout=15000)
+                                await cp.wait_for_timeout(3000)
+                            except:
+                                pass
                     courses = await self.get_courses_from_workshop(cp)
                     if courses:
                         break
