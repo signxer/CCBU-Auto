@@ -732,28 +732,79 @@ class DashboardScreen(QWidget):
         InfoBar.success("完成", f"学习流程结束，成功 {success} 门", parent=self, position=InfoBarPosition.TOP_RIGHT)
 
     def _on_tag_request(self, tags_by_category):
-        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, QWidget
+
+        # 加载上次选择
+        saved_tags = set()
+        try:
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+                    saved_tags = set(cfg.get("selected_tags", []))
+        except:
+            pass
 
         dlg = QDialog(self)
         dlg.setWindowTitle("选择标签")
-        dlg.setMinimumWidth(450)
+        dlg.setMinimumWidth(500)
         dlg.setMinimumHeight(500)
 
-        vlayout = QVBoxLayout(dlg)
-        vlayout.setSpacing(12)
+        outer = QVBoxLayout(dlg)
+        outer.setSpacing(12)
+        outer.setContentsMargins(20, 20, 20, 20)
 
-        label = SubtitleLabel("选择要学习的标签（不选则全部学习）")
-        vlayout.addWidget(label)
+        header = QHBoxLayout()
+        title = SubtitleLabel("选择要学习的标签")
+        header.addWidget(title)
+        header.addStretch()
+        btn_all = PushButton("全选")
+        btn_none = PushButton("全不选")
+        header.addWidget(btn_all)
+        header.addWidget(btn_none)
+        outer.addLayout(header)
 
-        list_widget = QListWidget()
-        list_widget.setSelectionMode(QListWidget.MultiSelection)
+        hint = CaptionLabel("不选则学习全部内容")
+        hint.setForegroundRole(self.palette().PlaceholderText)
+        outer.addWidget(hint)
+
+        # Scroll area with checkboxes
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll_widget = QWidget()
+        scroll_layout = QVBoxLayout(scroll_widget)
+        scroll_layout.setSpacing(2)
+        scroll_layout.setContentsMargins(8, 8, 8, 8)
+
         all_tags = []
+        checkboxes = []
         for category, tags in tags_by_category.items():
+            # Category header
+            cat_label = StrongBodyLabel(category)
+            cat_label.setStyleSheet("margin-top: 8px;")
+            scroll_layout.addWidget(cat_label)
+
             for tag in tags:
                 all_tags.append(tag)
-                list_widget.addItem(f"{category} → {tag}")
-        vlayout.addWidget(list_widget)
+                cb = CheckBox(f"  {tag}")
+                cb.setChecked(tag in saved_tags)
+                checkboxes.append(cb)
+                scroll_layout.addWidget(cb)
 
+        scroll_layout.addStretch()
+        scroll.setWidget(scroll_widget)
+        outer.addWidget(scroll, 1)
+
+        # All/None buttons
+        def select_all():
+            for cb in checkboxes:
+                cb.setChecked(True)
+        def select_none():
+            for cb in checkboxes:
+                cb.setChecked(False)
+        btn_all.clicked.connect(select_all)
+        btn_none.clicked.connect(select_none)
+
+        # Action buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
         btn_skip = PushButton("跳过")
@@ -762,17 +813,26 @@ class DashboardScreen(QWidget):
         btn_ok = PrimaryPushButton("确认选择")
         btn_ok.clicked.connect(lambda: dlg.done(1))
         btn_layout.addWidget(btn_ok)
-        vlayout.addLayout(btn_layout)
+        outer.addLayout(btn_layout)
 
         result = dlg.exec()
 
         if result:
-            selected = []
-            for i in range(list_widget.count()):
-                if list_widget.item(i).isSelected():
-                    selected.append(all_tags[i])
+            selected = [all_tags[i] for i, cb in enumerate(checkboxes) if cb.isChecked()]
         else:
             selected = []
+
+        # 保存选择
+        try:
+            cfg = {}
+            if os.path.exists(CONFIG_PATH):
+                with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                    cfg = json.load(f)
+            cfg["selected_tags"] = selected
+            with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, ensure_ascii=False, indent=2)
+        except:
+            pass
 
         win = self.window()
         win.cfg_tags = selected
