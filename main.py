@@ -1934,9 +1934,13 @@ class CCBULearner:
 
         return all_tasks, ws_locks
 
-    async def parallel_learn_courses(self, all_tasks: List, ws_locks: Dict, fetch_more_callback=None):
+    async def parallel_learn_courses(self, all_tasks: List, ws_locks: Dict, fetch_more_callback=None,
+                                      progress_callback=None, hours_callback=None, log_callback=None):
         """全局课程队列：所有 worker 跨专题班并发消费，自动标记已完成专题班
-        fetch_more_callback: async callable(queue) -> int，队列空时调用，往queue里加新任务，返回新增数"""
+        fetch_more_callback: async callable(queue) -> int，队列空时调用，往queue里加新任务，返回新增数
+        progress_callback: callable(data_dict) - Textual进度更新回调
+        hours_callback: callable(data_dict) - Textual学时更新回调
+        log_callback: callable(msg, style) - Textual日志回调"""
         if not all_tasks:
             console.print("没有需要学习的课程", style="green")
             return set()
@@ -1961,6 +1965,23 @@ class CCBULearner:
             """更新线程状态（线程安全）+ 心跳 + 进度追踪"""
             worker_status.setdefault(w_id, {}).update(kwargs)
             worker_heartbeat[w_id] = time.time()
+            # Textual回调
+            if progress_callback:
+                try:
+                    info = worker_status.get(w_id, {})
+                    try:
+                        eta = estimate_remaining(w_id)
+                    except:
+                        eta = "-"
+                    progress_callback({
+                        "wid": w_id,
+                        "course": info.get("course", "-"),
+                        "progress": info.get("progress", "-"),
+                        "eta": eta,
+                        "status": info.get("status", "-"),
+                    })
+                except:
+                    pass
             # 记录进度变化
             pct_str = kwargs.get("progress", "")
             if pct_str and pct_str != "-":
@@ -2268,62 +2289,80 @@ class CCBULearner:
         # 启动前先查询一次学时
         try:
             _h = await self._get_study_hours(self.pages[0])
-            study_hours_info.update({
+            _info = {
                 "central": _h.get("central", 0),
                 "online": _h.get("online", 0),
-                "updated": datetime.now().strftime("%H:%M:%S")
-            })
+                "updated": datetime.now().strftime("%H:%M:%S"),
+            }
+            study_hours_info.update(_info)
+            if hours_callback:
+                hours_callback(_info)
         except:
             pass
 
-        with Live(make_progress_table(), console=console, refresh_per_second=1) as live:
-            # 启动所有 worker
-            tasks = []
-            for w_id in range(num_workers):
-                tasks.append(asyncio.create_task(worker(w_id, self.pages[w_id])))
+        # 启动所有 worker
+        tasks = []
+        for w_id in range(num_workers):
+            tasks.append(asyncio.create_task(worker(w_id, self.pages[w_id])))
+            await asyncio.sleep(2)
+
+        # 心跳检测 + 刷新
+        async def refresh_display():
+            import time
+            while not all(t.done() for t in tasks):
+                # Textual模式：推送学时更新
+                if hours_callback:
+                    try:
+                        _h = await self._get_study_hours(self.pages[0])
+                        _info = {
+                            "central": _h.get("central", 0),
+                            "online": _h.get("online", 0),
+                            "updated": datetime.now().strftime("%H:%M:%S"),
+                        }
+                        study_hours_info.update(_info)
+                        hours_callback(_info)
+                    except:
+                        pass
+                # Rich模式：更新Live表格
+                elif live_ctx:
+                    live_ctx.update(make_progress_table())
+
                 await asyncio.sleep(2)
+                # 心跳检测
+                now = time.time()
+                for wid in range(num_workers):
+                    last = worker_heartbeat.get(wid, 0)
+                    if last > 0 and now - last > HEARTBEAT_TIMEOUT:
+                        info = worker_status.get(wid, {})
+                        status = info.get("status", "")
+                        if status in ("学习中", "查找按钮", "加载中"):
+                            debug(f"[心跳] 工作线程 {wid+1} 超时({now-last:.0f}s)，触发重试")
+                            task_info = worker_current_task.get(wid)
+                            if task_info:
+                                ws_id, cidx, course, ws_title, retry = task_info
+                                if retry < MAX_RETRY:
+                                    course_queue.put_nowait((ws_id, cidx, course, ws_title, retry + 1))
+                                    update_status(wid, status=f"超时重试")
+                                    try:
+                                        await self.pages[wid].close()
+                                    except:
+                                        pass
+                                    try:
+                                        self.pages[wid] = await self.context.new_page()
+                                    except:
+                                        pass
+                                else:
+                                    update_status(wid, status="超时放弃")
+                                    async with lock_stat:
+                                        failed[0] += 1
+                            worker_heartbeat[wid] = now
+            if live_ctx:
+                live_ctx.update(make_progress_table())
 
-            # 定期刷新表格 + 心跳检测
-            async def refresh_display():
-                import time
-                while not all(t.done() for t in tasks):
-                    live.update(make_progress_table())
-                    await asyncio.sleep(2)
-                    # 心跳检测：10分钟无进展触发取消重试
-                    now = time.time()
-                    for wid in range(num_workers):
-                        last = worker_heartbeat.get(wid, 0)
-                        if last > 0 and now - last > HEARTBEAT_TIMEOUT:
-                            info = worker_status.get(wid, {})
-                            status = info.get("status", "")
-                            # 只对"学习中"状态的worker触发超时
-                            if status in ("学习中", "查找按钮", "加载中"):
-                                debug(f"[心跳] 工作线程 {wid+1} 超时({now-last:.0f}s)，触发重试")
-                                # 放回队列重试
-                                task_info = worker_current_task.get(wid)
-                                if task_info:
-                                    ws_id, cidx, course, ws_title, retry = task_info
-                                    if retry < MAX_RETRY:
-                                        course_queue.put_nowait((ws_id, cidx, course, ws_title, retry + 1))
-                                        update_status(wid, status=f"超时重试")
-                                        # 关闭当前页面让worker重新开始
-                                        try:
-                                            await self.pages[wid].close()
-                                        except:
-                                            pass
-                                        # 创建新页面
-                                        try:
-                                            self.pages[wid] = await self.context.new_page()
-                                        except:
-                                            pass
-                                    else:
-                                        update_status(wid, status="超时放弃")
-                                        async with lock_stat:
-                                            failed[0] += 1
-                                # 重置心跳避免重复触发
-                                worker_heartbeat[wid] = now
-                live.update(make_progress_table())
-
+        # 根据模式选择显示方式
+        if progress_callback:
+            # Textual模式：不使用Rich Live
+            live_ctx = None
             refresh_task = asyncio.create_task(refresh_display())
             await asyncio.gather(*tasks, return_exceptions=True)
             refresh_task.cancel()
@@ -2331,9 +2370,24 @@ class CCBULearner:
                 await refresh_task
             except asyncio.CancelledError:
                 pass
+        else:
+            # CLI模式：使用Rich Live
+            with Live(make_progress_table(), console=console, refresh_per_second=1) as live:
+                live_ctx = live
+                refresh_task = asyncio.create_task(refresh_display())
+                await asyncio.gather(*tasks, return_exceptions=True)
+                refresh_task.cancel()
+                try:
+                    await refresh_task
+                except asyncio.CancelledError:
+                    pass
 
-        console.print(f"\n[bold green]学习任务完成: 成功 {completed_count[0]} 门, 失败 {failed[0]} 门[/bold green]")
-        console.print(f"已完成 {len(completed_ws_ids)}/{len(ws_progress)} 个专题班", style="green")
+        if log_callback:
+            log_callback(f"学习任务完成: 成功 {completed_count[0]} 门, 失败 {failed[0]} 门", "bold green")
+            log_callback(f"已完成 {len(completed_ws_ids)}/{len(ws_progress)} 个专题班", "green")
+        else:
+            console.print(f"\n[bold green]学习任务完成: 成功 {completed_count[0]} 门, 失败 {failed[0]} 门[/bold green]")
+            console.print(f"已完成 {len(completed_ws_ids)}/{len(ws_progress)} 个专题班", style="green")
         return completed_ws_ids
 
     async def get_available_tags(self, page: Page) -> Dict[str, List[str]]:

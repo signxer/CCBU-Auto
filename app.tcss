@@ -1,0 +1,245 @@
+/* CCBU-Auto Textual Styles */
+
+Screen {
+    align: center middle;
+}
+
+/* === Config Screen === */
+#config-container {
+    width: 60;
+    height: auto;
+    max-height: 90%;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#config-container Static.title {
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.config-row {
+    height: 3;
+    layout: horizontal;
+    margin-bottom: 1;
+}
+
+.config-row Label {
+    width: 16;
+    padding-top: 1;
+}
+
+.config-row Input {
+    width: 1fr;
+}
+
+.config-row Switch {
+    margin-top: 1;
+}
+
+#btn-start {
+    width: 100%;
+    margin-top: 1;
+}
+
+/* === Login Screen === */
+#login-container {
+    width: 60;
+    height: auto;
+    max-height: 90%;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#login-container Static.title {
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.login-row {
+    height: 3;
+    layout: horizontal;
+    margin-bottom: 1;
+}
+
+.login-row Label {
+    width: 10;
+    padding-top: 1;
+}
+
+.login-row Input {
+    width: 1fr;
+}
+
+#login-status {
+    height: 5;
+    overflow-y: auto;
+    border: solid $surface;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+
+#btn-login {
+    width: 100%;
+    margin-top: 1;
+}
+
+/* === Goal Screen === */
+#goal-container {
+    width: 60;
+    height: auto;
+    max-height: 90%;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#goal-container Static.title {
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+.goal-row {
+    height: 3;
+    layout: horizontal;
+    margin-bottom: 1;
+}
+
+.goal-row Label {
+    width: 16;
+    padding-top: 1;
+}
+
+.goal-row Input {
+    width: 12;
+}
+
+#btn-goal {
+    width: 100%;
+    margin-top: 1;
+}
+
+/* === Tag Screen === */
+#tag-container {
+    width: 70;
+    height: 80%;
+    border: solid $primary;
+    padding: 1 2;
+}
+
+#tag-container Static.title {
+    text-align: center;
+    text-style: bold;
+    color: $accent;
+    margin-bottom: 1;
+}
+
+#tag-list {
+    height: 1fr;
+    border: solid $surface;
+    margin-bottom: 1;
+}
+
+#tag-buttons {
+    height: 3;
+    layout: horizontal;
+}
+
+#tag-buttons Button {
+    width: 1fr;
+    margin: 0 1;
+}
+
+/* === Dashboard Screen === */
+#dashboard {
+    layout: vertical;
+    height: 100%;
+}
+
+#top-bar {
+    height: 3;
+    layout: horizontal;
+    background: $surface;
+    padding: 0 2;
+}
+
+#top-bar Static {
+    width: 1fr;
+    padding-top: 1;
+}
+
+#main-area {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#left-panel {
+    width: 40%;
+    layout: vertical;
+    border-right: solid $surface;
+}
+
+#hours-box {
+    height: auto;
+    max-height: 9;
+    border-bottom: solid $surface;
+    padding: 0 1;
+}
+
+#goal-box {
+    height: auto;
+    max-height: 7;
+    padding: 0 1;
+}
+
+#right-panel {
+    width: 60%;
+    layout: vertical;
+}
+
+#progress-header {
+    height: 3;
+    padding: 0 1;
+    background: $surface;
+}
+
+#worker-table {
+    height: 1fr;
+}
+
+#log-panel {
+    height: 12;
+    border-top: solid $surface;
+    padding: 0 1;
+}
+
+#log-panel Static.label {
+    height: 1;
+    background: $surface;
+    padding: 0 1;
+}
+
+#log-view {
+    height: 1fr;
+    overflow-y: auto;
+}
+
+/* Shared */
+.bold-green {
+    text-style: bold;
+    color: $success;
+}
+
+.bold-red {
+    text-style: bold;
+    color: $error;
+}
+
+.dim {
+    color: $text-muted;
+}
