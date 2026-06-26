@@ -421,6 +421,10 @@ class DashboardScreen(QWidget):
         title.setFont(QFont("", 16, QFont.Bold))
         header.addWidget(title)
         header.addStretch()
+        btn_settings = ToolButton(FIF.SETTING)
+        btn_settings.setToolTip("设置")
+        btn_settings.clicked.connect(lambda: self.window().show_settings())
+        header.addWidget(btn_settings)
         layout.addLayout(header)
 
         # Main area: left info | center table | right log
@@ -854,19 +858,6 @@ class MainWindow(MSFluentWindow):
         self.setMinimumSize(800, 500)
         self._drag_pos = None
 
-    def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPos() - self.pos()
-            event.accept()
-
-    def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self._drag_pos)
-            event.accept()
-
-    def mouseReleaseEvent(self, event):
-        self._drag_pos = None
-
         # Config state
         self.cfg_workers = 1
         self.cfg_headless = False
@@ -894,10 +885,54 @@ class MainWindow(MSFluentWindow):
         self.addSubInterface(self.screen_dashboard, FIF.HOME, "仪表盘")
 
         self._screen_index = 0
-        # Hide navigation (sequential flow, not side nav)
         self.navigationInterface.hide()
-        # Show config screen first
-        self.switchTo(self.screen_config)
+
+        # 检查是否有保存的配置，有则自动开始
+        has_config = self._load_saved_config()
+        if has_config:
+            self._screen_index = 3
+            self.switchTo(self.screen_dashboard)
+            self.screen_dashboard.start_learning()
+        else:
+            self.switchTo(self.screen_config)
+
+    def _load_saved_config(self):
+        """加载保存的配置，返回是否有完整配置"""
+        try:
+            if not os.path.exists(CONFIG_PATH):
+                return False
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            if "workers" not in cfg:
+                return False
+            self.cfg_workers = cfg.get("workers", 1)
+            self.cfg_headless = cfg.get("headless", False)
+            self.cfg_goal_type = cfg.get("goal_type", "central")
+            self.cfg_goal_hours = cfg.get("study_goal", 0)
+            self.cfg_tags = cfg.get("selected_tags", [])
+            # 加载账号
+            creds_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_credentials.json")
+            if os.path.exists(creds_path):
+                with open(creds_path, "r", encoding="utf-8") as f:
+                    creds = json.load(f)
+                self.cfg_username = creds.get("username", "")
+                self.cfg_password = creds.get("password", "")
+            return bool(self.cfg_username)
+        except:
+            return False
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._drag_pos = event.globalPos() - self.pos()
+            event.accept()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_pos and event.buttons() == Qt.LeftButton:
+            self.move(event.globalPos() - self._drag_pos)
+            event.accept()
+
+    def mouseReleaseEvent(self, event):
+        self._drag_pos = None
 
     def next_screen(self):
         self._screen_index += 1
@@ -908,6 +943,11 @@ class MainWindow(MSFluentWindow):
         elif self._screen_index == 3:
             self.switchTo(self.screen_dashboard)
             self.screen_dashboard.start_learning()
+
+    def show_settings(self):
+        """从仪表盘返回设置界面"""
+        self._screen_index = 0
+        self.switchTo(self.screen_config)
 
 
 # ─── Entry ─────────────────────────────────────────────────────────
