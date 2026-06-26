@@ -12,19 +12,17 @@
 
 ## 安装步骤
 
-### Mac / Linux（推荐）
+### Mac 双击运行（推荐）
+
+1. 下载或 clone 项目
+2. 双击 `启动.command`，首次运行会自动安装环境
+
+### 命令行安装
 
 ```bash
 git clone <仓库地址>
 cd CCBU-Auto
 ./setup.sh
-```
-
-### 手动安装
-
-```bash
-pip install -r requirements.txt
-playwright install chromium
 ```
 
 ## 使用方法
