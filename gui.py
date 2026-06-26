@@ -827,12 +827,13 @@ class MainWindow(MSFluentWindow):
 
     def next_screen(self):
         self._screen_index += 1
-        screens = [self.screen_config, self.screen_login, self.screen_goal, self.screen_dashboard]
-        if self._screen_index < len(screens):
-            screen = screens[self._screen_index]
-            self.switchTo(screen)
-            if self._screen_index == 3:
-                self.screen_dashboard.start_learning()
+        if self._screen_index == 1:
+            self.switchTo(self.screen_login)
+        elif self._screen_index == 2:
+            self.switchTo(self.screen_goal)
+        elif self._screen_index == 3:
+            self.switchTo(self.screen_dashboard)
+            self.screen_dashboard.start_learning()
 
     def next_screen(self):
         self._screen_index += 1
