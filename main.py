@@ -1876,7 +1876,7 @@ class CCBULearner:
         sem = asyncio.Semaphore(COLLECT_CONCURRENCY)
 
         async def collect_one(idx: int, ws: dict, cp: Page):
-            """单个专题班：直接用URL导航 + 获取课程（在自己的页面上执行，不开新标签页）"""
+            """单个专题班：每个专题班用新页面，避免SPA状态累积"""
             ws_title = ws['title'][:50]
             async with sem:
                 console.print(f"[采集 {idx+1}/{len(to_process)}] {ws_title}", style="blue")
@@ -1896,153 +1896,155 @@ class CCBULearner:
                     console.print(f"  ⊘ 已完成，跳过: {ws_title[:30]}", style="green")
                     return None
 
-                # 导航到专题班详情页
-                # 先回列表页重置SPA状态（保持session），再导航到目标
-                ws_url_my = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
-                ws_url_detail = f"https://u.ccb.com/workshop/#/detail?id={ws_id}"
-                list_url = "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise"
+                # 每个专题班创建新页面（避免SPA状态累积导致后面失败）
+                try:
+                    cp = await self.context.new_page()
+                except:
+                    pass
+                try:
+                    # 导航到专题班详情页
+                    ws_url_my = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
+                    ws_url_detail = f"https://u.ccb.com/workshop/#/detail?id={ws_id}"
 
-                body_text = ""
-                for nav_url in [ws_url_my, ws_url_detail]:
-                    try:
-                        # goto直接导航
-                        await cp.goto(nav_url, wait_until="domcontentloaded", timeout=20000)
-                        await cp.wait_for_timeout(6000)
-                    except Exception as e:
-                        debug(f"  导航异常: {e}")
+                    body_text = ""
+                    for nav_url in [ws_url_my, ws_url_detail]:
+                        try:
+                            await cp.goto(nav_url, wait_until="domcontentloaded", timeout=20000)
+                            await cp.wait_for_timeout(6000)
+                        except Exception as e:
+                            debug(f"  导航异常: {e}")
 
-                    # 检查是否加载了专题班内容
-                    try:
-                        body_text = await cp.locator("body").inner_text(timeout=3000)
-                    except:
-                        pass
-                    if "创建日期" in body_text or "报名" in body_text:
-                        break
-
-                    # 没加载出来，用JS reload强制刷新
-                    try:
-                        await cp.evaluate("location.reload()")
-                        await cp.wait_for_timeout(8000)
-                        body_text = await cp.locator("body").inner_text(timeout=3000)
+                        try:
+                            body_text = await cp.locator("body").inner_text(timeout=3000)
+                        except:
+                            pass
                         if "创建日期" in body_text or "报名" in body_text:
                             break
-                    except:
-                        pass
 
-                # 检查是否报名截止
-                if "报名截止" in body_text:
-                    console.print(f"  ⊘ 报名截止，跳过: {ws_title[:30]}", style="yellow")
-                    return None
-
-                # 点击"课程"标签页（部分专题班默认显示讨论区，需切换到课程列表）
-                for tab_text in ["课程", "课程列表", "课程目录"]:
-                    try:
-                        tab = cp.locator(f"text={tab_text}").first
-                        if await tab.count() > 0 and await tab.is_visible():
-                            await tab.click()
-                            await cp.wait_for_timeout(3000)
-                            break
-                    except:
-                        pass
-
-                # 等待课程表格加载（表格可能有结构但没数据）
-                for _wait in range(3):
-                    row_count = await cp.locator("tr.text-center").count()
-                    if row_count > 0:
-                        break
-                    # 检查是否有NaN（数据未加载完）
-                    page_text = ""
-                    try:
-                        page_text = await cp.locator("body").inner_text(timeout=2000)
-                    except:
-                        pass
-                    if "NaN" in page_text or "总课程门" in page_text:
-                        debug(f"  表格数据未加载，等待刷新({_wait+1}/3)")
-                        await cp.wait_for_timeout(5000)
-                    else:
-                        break
-
-                # 检查是否需要报名（页面上有"立即报名"按钮）
-                need_enroll = False
-                for kw in ["立即报名", "加入学习", "免费报名"]:
-                    try:
-                        btn = cp.locator(f"text={kw}").first
-                        if await btn.count() > 0 and await btn.is_visible():
-                            console.print(f"  需要报名，点击「{kw}」", style="blue")
-                            old_url = cp.url
-                            await btn.click()
-                            # 等待页面跳转（URL变化或按钮消失）
-                            for _ in range(10):
-                                await cp.wait_for_timeout(2000)
-                                new_url = cp.url
-                                if new_url != old_url:
-                                    debug(f"  报名后URL跳转: {new_url[:80]}")
-                                    break
-                                # 检查按钮是否已消失（有些报名不跳转URL）
-                                try:
-                                    still_visible = await cp.locator(f"text={kw}").first.is_visible(timeout=1000)
-                                    if not still_visible:
-                                        break
-                                except:
-                                    break
-                            await cp.wait_for_load_state("networkidle", timeout=15000)
-                            await cp.wait_for_timeout(3000)
-                            need_enroll = True
-                            break
-                    except:
-                        pass
-
-                # 报名后如果URL没变，重新导航到详情页
-                if need_enroll and "/myworkshop/" not in cp.url:
-                    try:
-                        await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
-                        await cp.wait_for_timeout(3000)
-                    except:
-                        pass
-
-                # 获取课程列表（重试5次）
-                courses = []
-                for attempt in range(10):
-                    if attempt > 0:
-                        console.print(f"  第 {attempt+1} 次获取课程...", style="yellow")
-                        debug(f"  [{ws_title[:20]}] 第{attempt+1}次重试, URL: {cp.url}")
                         try:
-                            await cp.goto(ws_url, wait_until="domcontentloaded", timeout=20000)
+                            await cp.evaluate("location.reload()")
                             await cp.wait_for_timeout(8000)
+                            body_text = await cp.locator("body").inner_text(timeout=3000)
+                            if "创建日期" in body_text or "报名" in body_text:
+                                break
                         except:
+                            pass
+
+                    # 检查是否报名截止
+                    if "报名截止" in body_text:
+                        console.print(f"  ⊘ 报名截止，跳过: {ws_title[:30]}", style="yellow")
+                        return None
+
+                    # 点击"课程"标签页
+                    for tab_text in ["课程", "课程列表", "课程目录"]:
+                        try:
+                            tab = cp.locator(f"text={tab_text}").first
+                            if await tab.count() > 0 and await tab.is_visible():
+                                await tab.click()
+                                await cp.wait_for_timeout(3000)
+                                break
+                        except:
+                            pass
+
+                    # 等待课程表格加载
+                    for _wait in range(3):
+                        row_count = await cp.locator("tr.text-center").count()
+                        if row_count > 0:
+                            break
+                        page_text = ""
+                        try:
+                            page_text = await cp.locator("body").inner_text(timeout=2000)
+                        except:
+                            pass
+                        if "NaN" in page_text or "总课程门" in page_text:
+                            debug(f"  表格数据未加载，等待刷新({_wait+1}/3)")
+                            await cp.wait_for_timeout(5000)
+                        else:
+                            break
+
+                    # 检查是否需要报名
+                    need_enroll = False
+                    for kw in ["立即报名", "加入学习", "免费报名"]:
+                        try:
+                            btn = cp.locator(f"text={kw}").first
+                            if await btn.count() > 0 and await btn.is_visible():
+                                console.print(f"  需要报名，点击「{kw}」", style="blue")
+                                old_url = cp.url
+                                await btn.click()
+                                # 等待页面跳转（URL变化或按钮消失）
+                                for _ in range(10):
+                                    await cp.wait_for_timeout(2000)
+                                    new_url = cp.url
+                                    if new_url != old_url:
+                                        debug(f"  报名后URL跳转: {new_url[:80]}")
+                                        break
+                                    try:
+                                        still_visible = await cp.locator(f"text={kw}").first.is_visible(timeout=1000)
+                                        if not still_visible:
+                                            break
+                                    except:
+                                        break
+                                await cp.wait_for_load_state("networkidle", timeout=15000)
+                                await cp.wait_for_timeout(3000)
+                                need_enroll = True
+                                break
+                        except:
+                            pass
+
+                    # 报名后如果URL没变，重新导航到详情页
+                    if need_enroll and "/myworkshop/" not in cp.url:
+                        try:
+                            await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
+                            await cp.wait_for_timeout(3000)
+                        except:
+                            pass
+
+                    # 获取课程列表（重试10次）
+                    courses = []
+                    for attempt in range(10):
+                        if attempt > 0:
+                            console.print(f"  第 {attempt+1} 次获取课程...", style="yellow")
+                            debug(f"  [{ws_title[:20]}] 第{attempt+1}次重试, URL: {cp.url}")
                             try:
-                                await cp.reload(wait_until="domcontentloaded", timeout=20000)
+                                await cp.goto(ws_url, wait_until="domcontentloaded", timeout=20000)
                                 await cp.wait_for_timeout(8000)
                             except:
-                                pass
-                    courses = await self.get_courses_from_workshop(cp)
-                    if courses:
-                        break
+                                try:
+                                    await cp.reload(wait_until="domcontentloaded", timeout=20000)
+                                    await cp.wait_for_timeout(8000)
+                                except:
+                                    pass
+                        courses = await self.get_courses_from_workshop(cp)
+                        if courses:
+                            break
 
-                if courses:
-                    to_learn = [(i, c) for i, c in enumerate(courses)
-                                if self._is_learnable(c.get('action', ''))]
-                    # debug: 记录 action 值
-                    action_vals = set(c.get('action', '') for c in courses)
-                    debug(f"  课程action值: {action_vals}, 待学: {len(to_learn)}")
-                    # 0门待学 → 该专题班已完成，立即标记
-                    if not to_learn:
-                        if ws_id not in completed_ids:
-                            completed_ids.add(ws_id)
-                            self.mark_workshop_completed(ws_id)
-                            debug(f"  标记已完成: {ws_id}")
-                        console.print(f"  ✓ 全部已完成（共{len(courses)}门）", style="green")
+                    if courses:
+                        to_learn = [(i, c) for i, c in enumerate(courses)
+                                    if self._is_learnable(c.get('action', ''))]
+                        action_vals = set(c.get('action', '') for c in courses)
+                        debug(f"  课程action值: {action_vals}, 待学: {len(to_learn)}")
+                        if not to_learn:
+                            if ws_id not in completed_ids:
+                                completed_ids.add(ws_id)
+                                self.mark_workshop_completed(ws_id)
+                                debug(f"  标记已完成: {ws_id}")
+                            console.print(f"  ✓ 全部已完成（共{len(courses)}门）", style="green")
+                        else:
+                            console.print(f"  ✓ {len(to_learn)} 门待学（共{len(courses)}门）", style="green")
+                        return {
+                            "ws_id": ws_id,
+                            "ws_title": ws_title,
+                            "tasks": [(ws_id, ci, c, ws_title) for ci, c in to_learn],
+                            "courses": courses
+                        }
                     else:
-                        console.print(f"  ✓ {len(to_learn)} 门待学（共{len(courses)}门）", style="green")
-                    return {
-                        "ws_id": ws_id,
-                        "ws_title": ws_title,
-                        "tasks": [(ws_id, ci, c, ws_title) for ci, c in to_learn],
-                        "courses": courses
-                    }
-                else:
-                    console.print(f"  ✗ 未获取到课程", style="yellow")
-                    return None
+                        console.print(f"  ✗ 未获取到课程", style="yellow")
+                        return None
+                finally:
+                    try:
+                        await cp.close()
+                    except:
+                        pass
 
         # 并行执行所有采集任务
         console.print(f"\n开始并行采集 {len(to_process)} 个专题班...", style="bold blue")
