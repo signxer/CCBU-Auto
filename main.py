@@ -197,26 +197,27 @@ class CCBULearner:
             else:
                 raise
         
-        # 创建浏览器上下文
+        # 创建浏览器上下文（禁用缓存，避免SPA加载异常）
+        context_opts = {
+            "viewport": {"width": 1920, "height": 1080},
+            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "bypass_csp": True,
+            "extra_http_headers": {
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        }
         if os.path.exists(STORAGE_STATE_PATH):
             try:
                 self.context = await self.browser.new_context(
-                    storage_state=STORAGE_STATE_PATH,
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    storage_state=STORAGE_STATE_PATH, **context_opts
                 )
                 console.print("已加载保存的会话", style="green")
             except Exception as e:
                 console.print("加载会话失败，创建新会话", style="yellow")
-                self.context = await self.browser.new_context(
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-                )
+                self.context = await self.browser.new_context(**context_opts)
         else:
-            self.context = await self.browser.new_context(
-                viewport={"width": 1920, "height": 1080},
-                user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
+            self.context = await self.browser.new_context(**context_opts)
         
         for i in range(self.workers):
             page = await self.context.new_page()
