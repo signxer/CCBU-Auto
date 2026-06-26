@@ -490,14 +490,12 @@ class DashboardScreen(QWidget):
         tl.addLayout(table_header)
 
         self.table = TableWidget()
-        self.table.setColumnCount(5)
-        self.table.setHorizontalHeaderLabels(["线程", "课程", "进度", "预计", "状态"])
-        self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 50)
+        self.table.setColumnCount(4)
+        self.table.setHorizontalHeaderLabels(["课程", "进度", "预计", "状态"])
+        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.table.setColumnWidth(1, 60)
         self.table.setColumnWidth(2, 60)
-        self.table.setColumnWidth(3, 60)
-        self.table.setColumnWidth(4, 90)
+        self.table.setColumnWidth(3, 90)
         self.table.setEditTriggers(TableWidget.NoEditTriggers)
         self.table.setSelectionMode(TableWidget.NoSelection)
         self.table.setBorderRadius(8)
@@ -545,11 +543,10 @@ class DashboardScreen(QWidget):
     def _init_table(self, workers):
         self.table.setRowCount(workers)
         for i in range(workers):
-            self.table.setItem(i, 0, QTableWidgetItem(str(i + 1)))
+            self.table.setItem(i, 0, QTableWidgetItem("-"))
             self.table.setItem(i, 1, QTableWidgetItem("-"))
             self.table.setItem(i, 2, QTableWidgetItem("-"))
-            self.table.setItem(i, 3, QTableWidgetItem("-"))
-            self.table.setItem(i, 4, QTableWidgetItem("等待中"))
+            self.table.setItem(i, 3, QTableWidgetItem("等待中"))
 
     def _set_goal_info(self, win):
         goal_type = getattr(win, "cfg_goal_type", "central")
@@ -713,10 +710,10 @@ class DashboardScreen(QWidget):
         wid = data.get("wid", 0)
         if wid >= self.table.rowCount():
             return
-        self.table.setItem(wid, 1, QTableWidgetItem(str(data.get("course", "-"))[:40]))
-        self.table.setItem(wid, 2, QTableWidgetItem(str(data.get("progress", "-"))))
-        self.table.setItem(wid, 3, QTableWidgetItem(str(data.get("eta", "-"))))
-        self.table.setItem(wid, 4, QTableWidgetItem(str(data.get("status", "-"))))
+        self.table.setItem(wid, 0, QTableWidgetItem(str(data.get("course", "-"))[:40]))
+        self.table.setItem(wid, 1, QTableWidgetItem(str(data.get("progress", "-"))))
+        self.table.setItem(wid, 2, QTableWidgetItem(str(data.get("eta", "-"))))
+        self.table.setItem(wid, 3, QTableWidgetItem(str(data.get("status", "-"))))
 
     def _on_hours(self, data):
         self.lbl_central.setText(f"集中培训: {data.get('central', 0):.1f} 学时")
