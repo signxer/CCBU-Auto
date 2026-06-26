@@ -26,7 +26,7 @@ from qfluentwidgets import (
     TableWidget, ProgressBar, ProgressRing,
     PlainTextEdit, TextEdit,
     SubtitleLabel, BodyLabel, CaptionLabel, StrongBodyLabel,
-    TitleLabel,
+    TitleLabel, IconWidget,
     InfoBar, InfoBarPosition,
     MessageBox, Dialog,
     HyperlinkButton,
@@ -620,8 +620,8 @@ class DashboardScreen(QWidget):
         hl.setSpacing(8)
         hl_title = QHBoxLayout()
         hl_title.setSpacing(6)
-        hl_icon = QLabel()
-        hl_icon.setPixmap(FIF.PEOPLE.icon().pixmap(16, 16))
+        hl_icon = IconWidget(FIF.PEOPLE, self)
+        hl_icon.setFixedSize(16, 16)
         hl_title.addWidget(hl_icon)
         hl_title.addWidget(SubtitleLabel("培训学时"))
         hl_title.addStretch()
@@ -643,8 +643,8 @@ class DashboardScreen(QWidget):
         gl_left.setSpacing(6)
         gl_title = QHBoxLayout()
         gl_title.setSpacing(6)
-        gl_icon = QLabel()
-        gl_icon.setPixmap(FIF.FLAG.icon().pixmap(16, 16))
+        gl_icon = IconWidget(FIF.FLAG, self)
+        gl_icon.setFixedSize(16, 16)
         gl_title.addWidget(gl_icon)
         gl_title.addWidget(SubtitleLabel("学习目标"))
         gl_title.addStretch()
@@ -672,8 +672,8 @@ class DashboardScreen(QWidget):
         table_header = QHBoxLayout()
         table_header.setContentsMargins(16, 12, 16, 8)
         table_header.setSpacing(6)
-        tbl_icon = QLabel()
-        tbl_icon.setPixmap(FIF.GAME.icon().pixmap(16, 16))
+        tbl_icon = IconWidget(FIF.GAME, self)
+        tbl_icon.setFixedSize(16, 16)
         table_header.addWidget(tbl_icon)
         table_header.addWidget(SubtitleLabel("学习进度"))
         table_header.addStretch()
@@ -707,8 +707,8 @@ class DashboardScreen(QWidget):
         log_header = QHBoxLayout()
         log_header.setContentsMargins(16, 12, 16, 8)
         log_header.setSpacing(6)
-        log_icon = QLabel()
-        log_icon.setPixmap(FIF.CHECKBOX.icon().pixmap(16, 16))
+        log_icon = IconWidget(FIF.CHECKBOX, self)
+        log_icon.setFixedSize(16, 16)
         log_header.addWidget(log_icon)
         log_header.addWidget(SubtitleLabel("日志"))
         log_header.addStretch()
