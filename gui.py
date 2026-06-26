@@ -805,9 +805,13 @@ class MainWindow(MSFluentWindow):
 
         # Screens
         self.screen_config = ConfigScreen(self)
+        self.screen_config.setObjectName("config")
         self.screen_login = LoginScreen(self)
+        self.screen_login.setObjectName("login")
         self.screen_goal = GoalScreen(self)
+        self.screen_goal.setObjectName("goal")
         self.screen_dashboard = DashboardScreen(self)
+        self.screen_dashboard.setObjectName("dashboard")
 
         # Add sub interfaces with icons
         self.addSubInterface(self.screen_config, FIF.SETTING, "配置")
