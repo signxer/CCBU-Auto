@@ -835,13 +835,6 @@ class MainWindow(MSFluentWindow):
             self.switchTo(self.screen_dashboard)
             self.screen_dashboard.start_learning()
 
-    def next_screen(self):
-        self._screen_index += 1
-        if self._screen_index < self.stack.count():
-            self.stack.setCurrentIndex(self._screen_index)
-            if self._screen_index == 3:
-                self.screen_dashboard.start_learning()
-
 
 # ─── Entry ─────────────────────────────────────────────────────────
 
