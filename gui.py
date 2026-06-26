@@ -826,6 +826,27 @@ class DashboardScreen(QWidget):
                 except:
                     pass
 
+                # 检查是否还在登录页（session过期）
+                body = ""
+                try:
+                    body = await page.locator("body").inner_text(timeout=3000)
+                except:
+                    pass
+                if "立即登录" in body or "密码登录" in body or "统一认证" in body:
+                    log("Session过期，请在浏览器中重新登录...", "red")
+                    await page.goto("https://u.ccb.com/portal/#/study", wait_until="domcontentloaded", timeout=15000)
+                    # 等待用户手动登录
+                    for _ in range(120):
+                        await asyncio.sleep(2)
+                        try:
+                            check_body = await page.locator("body").inner_text(timeout=2000)
+                            if "立即登录" not in check_body and "密码登录" not in check_body:
+                                break
+                        except:
+                            pass
+                    log("登录成功，继续加载...", "green")
+                    continue
+
                 try:
                     tags_by_category = await learner.get_available_tags(page) or {}
                 except:
