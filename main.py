@@ -2073,8 +2073,9 @@ class CCBULearner:
 
             while True:
                 try:
-                    ws_id, cidx, course, ws_title, retry = course_queue.get_nowait()
-                except asyncio.QueueEmpty:
+                    ws_id, cidx, course, ws_title, retry = await asyncio.wait_for(
+                        course_queue.get(), timeout=30)
+                except (asyncio.TimeoutError, asyncio.QueueEmpty):
                     break
 
                 title = course['title'][:40]
