@@ -427,17 +427,20 @@ class DashboardScreen(QWidget):
         header.addWidget(btn_settings)
         layout.addLayout(header)
 
-        # Main area: left info | center table | right log
+        # Main area: left (info+table) | right (log)
         main_area = QHBoxLayout()
         main_area.setSpacing(10)
 
-        # ── Left panel: hours + goal ──
+        # ── Left panel ──
         left = QVBoxLayout()
         left.setSpacing(10)
 
+        # Row 1: hours + goal side by side
+        info_row = QHBoxLayout()
+        info_row.setSpacing(10)
+
         hours_card = SimpleCardWidget(self)
         hours_card.setBorderRadius(8)
-        hours_card.setFixedWidth(200)
         hl = QVBoxLayout(hours_card)
         hl.setContentsMargins(14, 10, 14, 10)
         hl.setSpacing(6)
@@ -448,34 +451,30 @@ class DashboardScreen(QWidget):
         hl.addWidget(self.lbl_central)
         hl.addWidget(self.lbl_online)
         hl.addWidget(self.lbl_updated)
-        left.addWidget(hours_card)
+        info_row.addWidget(hours_card, 1)
 
         goal_card = SimpleCardWidget(self)
         goal_card.setBorderRadius(8)
-        goal_card.setFixedWidth(200)
-        gl = QVBoxLayout(goal_card)
+        gl = QHBoxLayout(goal_card)
         gl.setContentsMargins(14, 10, 14, 10)
-        gl.setSpacing(8)
-        gl.addWidget(SubtitleLabel("🎯 学习目标"))
+        gl.setSpacing(12)
+        gl_left = QVBoxLayout()
+        gl_left.setSpacing(4)
+        gl_left.addWidget(SubtitleLabel("🎯 学习目标"))
         self.lbl_goal_info = BodyLabel("--")
-        gl.addWidget(self.lbl_goal_info)
-
-        # Progress ring centered
-        ring_layout = QHBoxLayout()
-        ring_layout.addStretch()
+        gl_left.addWidget(self.lbl_goal_info)
+        gl_left.addStretch()
+        gl.addLayout(gl_left)
         self.progress_ring = ProgressRing()
-        self.progress_ring.setFixedSize(80, 80)
+        self.progress_ring.setFixedSize(72, 72)
         self.progress_ring.setValue(0)
         self.progress_ring.setTextVisible(True)
-        ring_layout.addWidget(self.progress_ring)
-        ring_layout.addStretch()
-        gl.addLayout(ring_layout)
-        left.addWidget(goal_card)
+        gl.addWidget(self.progress_ring)
+        info_row.addWidget(goal_card, 1)
 
-        left.addStretch()
-        main_area.addLayout(left)
+        left.addLayout(info_row)
 
-        # ── Center: worker table ──
+        # Row 2: worker table
         table_card = SimpleCardWidget(self)
         table_card.setBorderRadius(8)
         tl = QVBoxLayout(table_card)
@@ -504,7 +503,8 @@ class DashboardScreen(QWidget):
         self.table.setBorderRadius(8)
         tl.addWidget(self.table)
 
-        main_area.addWidget(table_card, 1)
+        left.addWidget(table_card, 1)
+        main_area.addLayout(left, 1)
 
         # ── Right panel: log ──
         log_card = SimpleCardWidget(self)
