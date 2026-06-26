@@ -813,21 +813,30 @@ class DashboardScreen(QWidget):
             learner.goal_type = cfg_goal_type
 
             page = learner.pages[0]
-            await page.goto(
-                "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
-                wait_until="networkidle", timeout=30000,
-            )
-            await page.wait_for_timeout(5000)
+            list_url = "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise"
 
-            # 标签筛选：总是询问用户
+            # 加载专题班列表页（重试最多5次）
             tags_by_category = {}
-            try:
-                tags_by_category = await learner.get_available_tags(page) or {}
+            for load_attempt in range(5):
+                try:
+                    await page.goto(list_url, wait_until="domcontentloaded", timeout=20000)
+                    await page.wait_for_timeout(6000)
+                except:
+                    pass
+
+                try:
+                    tags_by_category = await learner.get_available_tags(page) or {}
+                except:
+                    pass
+
                 if tags_by_category:
                     tag_count = sum(len(v) for v in tags_by_category.values())
                     log(f"发现 {tag_count} 个标签", "blue")
-            except Exception as e:
-                log(f"标签加载失败: {e}", "yellow")
+                    break
+
+                if load_attempt < 4:
+                    log(f"标签未加载，重试({load_attempt+1}/5)...", "yellow")
+                    await page.wait_for_timeout(3000)
 
             if cfg_tags:
                 # 有已保存标签，询问用户
