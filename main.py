@@ -1545,12 +1545,13 @@ class CCBULearner:
                 except:
                     pass
 
+            skipped = []  # 被过滤的课程
             for row in rows_data:
                 title = row.get('title', '').strip()
                 ctype = row.get('type', '').strip()
                 # 排除图书/图书包
                 if '图书' in ctype or ctype in ('考试', 'scorm'):
-                    debug(f"跳过图书: {title[:40]}")
+                    skipped.append(f"{ctype}: {title[:30]}")
                     continue
                 if title and len(title) > 3:
                     courses.append(row)
@@ -1576,8 +1577,11 @@ class CCBULearner:
             raw_count = await page.locator("tr.text-center").count()
             if raw_count > 0 and len(courses) == 0:
                 # 表格有行但全被过滤（图书/考试等），不需要重试
-                debug(f"  表格有{raw_count}行但全被过滤，无需重试")
-                console.print(f"课程列表: 0 门（全被过滤）", style="yellow")
+                skipped_str = ", ".join(skipped[:5])
+                if len(skipped) > 5:
+                    skipped_str += f" 等{len(skipped)}项"
+                debug(f"  表格有{raw_count}行但全被过滤: {skipped_str}")
+                console.print(f"课程列表: 0 门（过滤: {skipped_str}）", style="yellow")
                 return []  # 返回空列表表示确实没有可学课程
 
             if raw_count == 0 and len(courses) == 0:
