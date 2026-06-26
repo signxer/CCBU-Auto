@@ -1008,7 +1008,12 @@ class CCBULearner:
         all_found = True
 
         try:
-            await page.wait_for_timeout(3000)
+            # 等待标签树加载
+            await page.wait_for_timeout(5000)
+            try:
+                await page.wait_for_selector("ul.tag-tree-list", timeout=15000)
+            except:
+                debug("标签树未加载，继续尝试...")
 
             for tag in self.tags_to_learn:
                 console.print(f"查找标签: {tag}", style="blue")
@@ -1020,7 +1025,14 @@ class CCBULearner:
                     try:
                         all_tags = page.locator("ul.tag-tree-list span.single-tag")
                         cnt = await all_tags.count()
-                        debug(f"tag-tree-list: {cnt} spans")
+                        debug(f"tag-tree-list: {cnt} spans, URL: {page.url}")
+                        if cnt == 0:
+                            # 打印页面结构帮助排查
+                            try:
+                                body = await page.locator("body").inner_text(timeout=3000)
+                                debug(f"页面内容前200字: {body[:200]}")
+                            except:
+                                pass
                         for i in range(cnt):
                             text = (await all_tags.nth(i).inner_text()).strip()
                             if text == tag:
