@@ -899,6 +899,8 @@ class DashboardScreen(QWidget):
             if tasks:
                 log(f"开始学习（{len(tasks)} 门课程, {cfg_workers} 个线程）", "bold blue")
                 _fetch_lock = asyncio.Lock()
+                # 创建独立页面用于采集（不与学习worker冲突）
+                _collect_page = await learner.context.new_page()
 
                 async def fetch_more_courses(queue):
                     if no_more_pages:
@@ -914,27 +916,27 @@ class DashboardScreen(QWidget):
                                     return 0
                             except:
                                 pass
-                        # 先回到专题班列表页（采集后页面可能在其他URL）
+                        # 用独立页面导航到列表页
                         try:
-                            await page.goto(
+                            await _collect_page.goto(
                                 "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
-                                wait_until="domcontentloaded", timeout=15000)
-                            await page.wait_for_timeout(3000)
+                                wait_until="domcontentloaded", timeout=20000)
+                            await _collect_page.wait_for_timeout(8000)
                         except:
                             pass
-                        moved = await learner.go_to_next_page(page)
+                        moved = await learner.go_to_next_page(_collect_page)
                         if not moved:
                             return 0
                         nonlocal page_num
                         page_num += 1
-                        await page.wait_for_timeout(3000)
-                        new_ws = await learner.get_workshops(page)
+                        await _collect_page.wait_for_timeout(5000)
+                        new_ws = await learner.get_workshops(_collect_page)
                         if not new_ws:
                             return 0
                         log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
                         learner.save_progress(completed_ids, page_num, 0)
                         new_t, new_l = await learner._collect_workshops_courses(
-                            page, new_ws, completed_ids
+                            _collect_page, new_ws, completed_ids
                         )
                         ws_locks.update(new_l)
                         for t in new_t:
