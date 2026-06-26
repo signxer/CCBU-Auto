@@ -602,11 +602,15 @@ class DashboardScreen(QWidget):
                         self._tag_event.clear()
                         thread.tag_request_signal.emit(tags_by_category)
                         await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
-                        cfg_tags = getattr(win, "cfg_tags", [])
+                        # 重新读取用户选择的标签
+                        cfg_tags = list(getattr(win, "cfg_tags", []))
+                        log(f"已选择标签: {cfg_tags}" if cfg_tags else "未选择标签", "green" if cfg_tags else "yellow")
                 except Exception as e:
                     log(f"标签加载失败: {e}", "yellow")
 
             if cfg_tags:
+                learner.tags_to_learn = cfg_tags
+                log(f"应用标签筛选: {', '.join(cfg_tags)}", "blue")
                 await learner.filter_by_tags(page)
 
             progress = learner.load_progress()
