@@ -1085,6 +1085,9 @@ class DashboardScreen(QWidget):
     def _on_tag_confirm(self, saved_tags, tags_by_category):
         """有已保存标签时，询问用户：使用已保存 / 重新选择 / 跳过"""
         from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout
+        from PyQt5.QtCore import QTimer
+
+        TIMEOUT = 10  # 秒
 
         dlg = QDialog(self)
         dlg.setWindowTitle("标签筛选")
@@ -1119,12 +1122,33 @@ class DashboardScreen(QWidget):
         btn_resel.clicked.connect(lambda: dlg.done(1))
         btn_layout.addWidget(btn_resel)
 
-        btn_use = PrimaryPushButton("  使用已保存")
+        btn_use = PrimaryPushButton(f"  使用已保存 ({TIMEOUT}s)")
         btn_use.setIcon(FIF.ACCEPT_MEDIUM)
         btn_use.clicked.connect(lambda: dlg.done(2))
         btn_layout.addWidget(btn_use)
 
         layout.addLayout(btn_layout)
+
+        # 倒计时
+        countdown = [TIMEOUT]
+        timer = QTimer(dlg)
+        timer.setInterval(1000)
+
+        def tick():
+            countdown[0] -= 1
+            if countdown[0] <= 0:
+                timer.stop()
+                dlg.done(2)
+            else:
+                btn_use.setText(f"  使用已保存 ({countdown[0]}s)")
+
+        timer.timeout.connect(tick)
+        timer.start()
+
+        # 用户点击任何按钮时停止倒计时
+        btn_skip.clicked.connect(timer.stop)
+        btn_resel.clicked.connect(timer.stop)
+        btn_use.clicked.connect(timer.stop)
 
         result = dlg.exec()
 
