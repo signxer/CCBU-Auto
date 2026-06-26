@@ -365,7 +365,7 @@ class GoalScreen(QWidget):
         btn_layout.addStretch()
 
         btn_skip = PushButton("  跳过")
-        btn_skip.setIcon(FIF.SKIP)
+        btn_skip.setIcon(FIF.CLOSE)
         btn_skip.setFixedSize(120, 40)
         btn_skip.clicked.connect(lambda: self._on_done(0, "central"))
         btn_layout.addWidget(btn_skip)
