@@ -1510,7 +1510,6 @@ class CCBULearner:
                     const typeCell = cells[0].querySelector('.course-type');
                     const pct = cells[4].querySelector('.percent-text');
                     const actionSpan = cells[5].querySelector('.edit-block');
-                    // 提取课程唯一标识：优先用链接href，其次用data-id，最后用行索引
                     const link = cells[1].querySelector('a') || tr.querySelector('a[href*="course"]');
                     const href = link ? link.getAttribute('href') : '';
                     const dataId = tr.getAttribute('data-id') || tr.getAttribute('data-course-id') || '';
@@ -1526,6 +1525,21 @@ class CCBULearner:
                 });
                 return results;
             }""")
+
+            debug(f"  原始表格行数: {len(rows_data)}, URL: {page.url}")
+            if not rows_data:
+                # 没有任何行，dump页面关键区域
+                try:
+                    html_snippet = await page.evaluate("""() => {
+                        const t = document.querySelector('table');
+                        if (t) return t.outerHTML.substring(0, 1000);
+                        const main = document.querySelector('.workshop-detail, .detail-content, #app');
+                        if (main) return main.innerHTML.substring(0, 1000);
+                        return document.body.innerHTML.substring(0, 1000);
+                    }""")
+                    debug(f"  页面HTML: {html_snippet[:500]}")
+                except:
+                    pass
 
             for row in rows_data:
                 title = row.get('title', '').strip()
@@ -1984,6 +1998,7 @@ class CCBULearner:
                 for attempt in range(5):
                     if attempt > 0:
                         console.print(f"  第 {attempt+1} 次获取课程...", style="yellow")
+                        debug(f"  [{ws_title[:20]}] 第{attempt+1}次重试, URL: {cp.url}")
                         try:
                             await cp.goto(ws_url, wait_until="domcontentloaded", timeout=15000)
                             await cp.wait_for_timeout(5000)
