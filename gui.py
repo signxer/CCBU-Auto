@@ -846,7 +846,11 @@ class DashboardScreen(QWidget):
             if cfg_tags:
                 learner.tags_to_learn = cfg_tags
                 log(f"应用标签筛选: {', '.join(cfg_tags)}", "blue")
-                await learner.filter_by_tags(page)
+                filter_ok = await learner.filter_by_tags(page)
+                if not filter_ok:
+                    log("标签筛选失败，停止学习", "red")
+                    thread.done_signal.emit(0, 0)
+                    return
 
             progress = learner.load_progress()
             completed_ids = set(progress.get("completed_ws_ids", []))

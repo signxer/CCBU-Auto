@@ -999,21 +999,22 @@ class CCBULearner:
 
         console.print(table)
 
-    async def filter_by_tags(self, page: Page):
-        """根据标签筛选专题班"""
+    async def filter_by_tags(self, page: Page) -> bool:
+        """根据标签筛选专题班，返回是否成功"""
         if not self.tags_to_learn:
-            return
-        
+            return True
+
         console.print(f"正在筛选标签: {', '.join(self.tags_to_learn)}", style="blue")
-        
+        all_found = True
+
         try:
             await page.wait_for_timeout(3000)
-            
+
             for tag in self.tags_to_learn:
                 console.print(f"查找标签: {tag}", style="blue")
-                
+
                 found = False
-                
+
                 # 方法1：在 tag-tree-list 中查找 span.single-tag 匹配文本
                 for attempt in range(3):
                     try:
@@ -1034,10 +1035,10 @@ class CCBULearner:
                     except Exception as e1:
                         console.print(f"  方法1尝试 {attempt+1} 失败: {e1}", style="yellow")
                     await page.wait_for_timeout(2000)
-                
+
                 if found:
                     continue
-                
+
                 # 方法2：在全页面范围找匹配文本的可见clickable元素
                 for attempt in range(3):
                     try:
@@ -1062,15 +1063,20 @@ class CCBULearner:
                     except:
                         pass
                     await page.wait_for_timeout(2000)
-                
+
                 if not found:
-                    console.print(f"  未找到标签: {tag}", style="yellow")
-            
-            console.print("标签筛选完成", style="green")
+                    console.print(f"  ✗ 未找到标签: {tag}", style="red")
+                    all_found = False
+
+            if all_found:
+                console.print("标签筛选完成", style="green")
+            else:
+                console.print("部分标签未找到，筛选可能不完整", style="yellow")
         except Exception as e:
-            console.print(f"标签筛选失败: {e}，将使用所有专题班", style="yellow")
-            import traceback
-            traceback.print_exc()
+            console.print(f"标签筛选失败: {e}", style="red")
+            all_found = False
+
+        return all_found
 
     async def enroll_workshop(self, page: Page, workshop_title: str):
         """报名专题班 - 进入专题班详情页，点击报名/学习"""
