@@ -12,15 +12,18 @@
 
 ## 安装步骤
 
-### 1. 安装依赖
+### Mac / Linux（推荐）
+
+```bash
+git clone <仓库地址>
+cd CCBU-Auto
+./setup.sh
+```
+
+### 手动安装
 
 ```bash
 pip install -r requirements.txt
-```
-
-### 2. 安装 Playwright 浏览器
-
-```bash
 playwright install chromium
 ```
 

@@ -1,12 +1,20 @@
-.env
-study_records.json
+# 运行时数据
+ccbu_session.json
+ccbu_credentials.json
+ccbu_config.json
+ccbu_progress.json
+ccbu_tags.json
+ccbu_debug.log
+
+# Python
 __pycache__/
 *.pyc
 *.pyo
-*.pyd
-.Python
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+.DS_Store

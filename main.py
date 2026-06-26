@@ -2,8 +2,19 @@
 import asyncio
 import json
 import os
+import platform
+import queue
+import re
+import sys
+import threading
+import time
+import traceback
 from datetime import datetime
 from typing import List, Dict, Optional
+
+# Windows需要ProactorEventLoop才能支持subprocess等
+if platform.system() == "Windows":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 import click
 from dotenv import load_dotenv
@@ -20,6 +31,7 @@ STORAGE_STATE_PATH = "ccbu_session.json"
 USER_CREDENTIALS_PATH = "ccbu_credentials.json"
 TAGS_STATE_PATH = "ccbu_tags.json"
 CONFIG_PATH = "ccbu_config.json"
+PROGRESS_PATH = "ccbu_progress.json"
 
 
 def safe_print(text, style=None):
@@ -52,17 +64,59 @@ def debug(msg: str):
     except:
         pass
 
-async def async_input(prompt: str, default: str = "y", timeout: int = 5) -> str:
-    """带超时的输入，超时后自动返回默认值"""
-    console.print(f"{prompt}（{timeout}秒后自动: {default}）", style="yellow", end="")
+# === 常驻 stdin 读取线程 ===
+# 单一线程读 stdin，通过 queue 分发给各 async_input 调用，
+# 彻底避免多线程竞争 stdin 导致输入丢失。
+_stdin_line_q = queue.Queue()
+
+
+def _stdin_reader_thread():
+    """常驻后台线程：持续读取 stdin 每一行，放入队列（保留原始输入）"""
+    while True:
+        try:
+            line = input()
+            _stdin_line_q.put(line.strip())
+        except EOFError:
+            break
+        except Exception:
+            break
+
+
+_stdin_thread = threading.Thread(target=_stdin_reader_thread, daemon=True)
+_stdin_thread.start()
+
+
+async def async_input(prompt: str, default: str = "y", timeout: int = 5,
+                       block: bool = False, raw: bool = False, password: bool = False) -> str:
+    """带超时的输入，从常驻 stdin 队列取数据。
+
+    Args:
+        prompt: 提示文字
+        default: 超时后的默认值
+        timeout: 超时秒数
+        block: True=无限等待（用于"按回车键继续"类场景）
+        raw: True=不 strip/lowercase（用于用户名等需要保留原始输入的场景）
+        password: True=输入后清除行（密码输入用）
+    """
+    if block:
+        console.print(prompt, style="yellow", end="")
+    else:
+        console.print(f"{prompt}（{timeout}秒后自动: {default}）", style="yellow", end="")
+
     try:
-        result = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(None, lambda: input().strip().lower()),
-            timeout=timeout
-        )
-        return result if result else default
-    except asyncio.TimeoutError:
-        console.print(f"[超时，自动: {default}]", style="yellow")
+        if block:
+            line = await asyncio.get_event_loop().run_in_executor(
+                None, _stdin_line_q.get)
+        else:
+            line = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: _stdin_line_q.get(timeout=timeout))
+        # 密码模式：清除刚输入的那一行
+        if password:
+            sys.stdout.write("\033[A\033[K")  # 上移一行并清除
+            sys.stdout.flush()
+        return line if raw else (line.strip().lower() if line else default)
+    except queue.Empty:
+        console.print(f"\n[超时，自动: {default}]", style="yellow")
         return default
 
 
@@ -83,19 +137,65 @@ class CCBULearner:
         self.user_data = {}
 
     async def init(self):
+        # 清理Playwright残留的chromium进程（不影响用户自己的浏览器）
+        import subprocess, sys
+        try:
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
+                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+            else:
+                # 只杀Playwright残留进程，不杀用户自己的浏览器
+                subprocess.run(["pkill", "-f", "chrome-headless-shell"],
+                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+                subprocess.run(["pkill", "-f", "chromium.*--remote-debugging"],
+                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+        except:
+            pass
+
         self.playwright = await async_playwright().start()
-        # Windows下自动检测系统Chrome
+        # 优先使用系统Chrome，找不到再用内置Chromium
         import sys
         launch_opts = {"headless": self.headless}
+        use_system_chrome = False
+
         if sys.platform == "win32":
-            try:
-                import subprocess
-                subprocess.run(["where", "chrome"], check=True, capture_output=True, timeout=3)
-                launch_opts["channel"] = "chrome"
-                console.print("使用系统Chrome", style="green")
-            except:
-                console.print("使用内置Chrome", style="yellow")
-        self.browser = await self.playwright.chromium.launch(**launch_opts)
+            # Windows: 检查常见Chrome安装路径
+            chrome_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+            ]
+            for path in chrome_paths:
+                if os.path.exists(path):
+                    launch_opts["channel"] = "chrome"
+                    use_system_chrome = True
+                    console.print(f"使用系统Chrome", style="green")
+                    break
+            if not use_system_chrome:
+                try:
+                    import subprocess
+                    subprocess.run(["where", "chrome"], check=True, capture_output=True, timeout=3)
+                    launch_opts["channel"] = "chrome"
+                    use_system_chrome = True
+                    console.print("使用系统Chrome (PATH)", style="green")
+                except:
+                    pass
+        else:
+            # macOS/Linux: 默认使用内置Chromium，不检测系统Chrome
+            pass
+
+        if not use_system_chrome:
+            console.print("使用内置Chromium", style="yellow")
+
+        try:
+            self.browser = await self.playwright.chromium.launch(**launch_opts)
+        except Exception as e:
+            if use_system_chrome:
+                console.print("系统Chrome启动失败，改用内置Chromium", style="yellow")
+                launch_opts.pop("channel", None)
+                self.browser = await self.playwright.chromium.launch(**launch_opts)
+            else:
+                raise
         
         # 创建浏览器上下文
         if os.path.exists(STORAGE_STATE_PATH):
@@ -157,17 +257,18 @@ class CCBULearner:
             except:
                 pass
         
-        # 强制结束chromium进程（兜底，兼容Windows）
+        # 强制结束Playwright残留进程
         import subprocess, sys
         try:
             if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"], 
-                              stderr=subprocess.DEVNULL, timeout=5)
-                subprocess.run(["taskkill", "/F", "/IM", "msedge.exe"], 
-                              stderr=subprocess.DEVNULL, timeout=5)
+                # Windows: 用wmic查找并杀掉Playwright的chrome进程
+                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
+                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
             else:
-                subprocess.run(["pkill", "-f", "chrome"], stderr=subprocess.DEVNULL, timeout=5)
-                subprocess.run(["pkill", "-f", "chromium"], stderr=subprocess.DEVNULL, timeout=5)
+                subprocess.run(["pkill", "-f", "chrome-headless-shell"],
+                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+                subprocess.run(["pkill", "-f", "chromium.*--remote-debugging"],
+                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
         except:
             pass
 
@@ -243,9 +344,40 @@ class CCBULearner:
         except Exception as e:
             console.print("保存凭证失败", style="yellow")
 
+    def load_progress(self) -> dict:
+        """加载学习进度（已完成的专题班ID集合）"""
+        try:
+            if os.path.exists(PROGRESS_PATH):
+                with open(PROGRESS_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                return data
+        except:
+            pass
+        return {"completed_ws_ids": [], "last_page": 1, "last_idx": 0}
+
+    def save_progress(self, completed_ws_ids: set, last_page: int = 1, last_idx: int = 0):
+        """保存学习进度"""
+        try:
+            with open(PROGRESS_PATH, 'w', encoding='utf-8') as f:
+                json.dump({
+                    "completed_ws_ids": list(completed_ws_ids),
+                    "last_page": last_page,
+                    "last_idx": last_idx,
+                    "updated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            debug(f"保存进度失败: {e}")
+
+    def mark_workshop_completed(self, ws_id: str):
+        """标记单个专题班完成，立即落盘"""
+        progress = self.load_progress()
+        completed = set(progress.get("completed_ws_ids", []))
+        completed.add(ws_id)
+        self.save_progress(completed,
+                           progress.get("last_page", 1),
+                           progress.get("last_idx", 0))
+
     async def login(self):
-        import getpass
-        
         console.print("建行学习自动登录", style="bold blue")
         
         # 先检查是否已登录
@@ -292,8 +424,7 @@ class CCBULearner:
         use_saved = False
         
         if saved_credentials and 'username' in saved_credentials:
-            console.print(f"发现已保存账号: {saved_credentials['username']}，是否使用？(y/n，默认y) ", style="yellow", end="")
-            choice = input().strip().lower()
+            choice = await async_input(f"发现已保存账号: {saved_credentials['username']}，是否使用？(y/n，默认y)", default="y", timeout=5)
             if choice != 'n' and choice != 'no':
                 use_saved = True
         
@@ -301,30 +432,29 @@ class CCBULearner:
             username = saved_credentials['username']
             password = saved_credentials.get('password', '')
             if not password:
-                password = getpass.getpass("请输入密码: ")
+                password = await async_input("请输入密码", default="", timeout=300, block=True, raw=True, password=True)
         else:
             # 询问用户是自动登录还是手动登录
-            console.print("是否使用自动登录？(y/n，默认y) ", style="yellow", end="")
-            choice = input().strip().lower()
+            choice = await async_input("是否使用自动登录？(y/n，默认y)", default="y", timeout=5)
             
             if choice == 'n' or choice == 'no':
                 # 手动登录模式
                 console.print("请在打开的浏览器中完成登录...", style="bold blue")
                 await page.goto("https://u.ccb.com/portal/#/study")
-                
+
                 console.print("等待登录完成...", style="yellow")
                 console.print("提示：登录成功后按回车键继续", style="green")
-                
-                input("")
-                
+
+                await async_input("登录成功后按回车键继续", default="", timeout=600, block=True)
+
                 console.print("✓ 登录成功!", style="bold green")
                 return
             else:
                 # 自动登录模式
                 console.print()
-                console.print("请输入建行统一认证账号: ", style="cyan", end="")
-                username = input().strip()
-                password = getpass.getpass("请输入密码: ")
+                username = await async_input("请输入建行统一认证账号", default="", timeout=300, block=True, raw=True)
+                # 密码也用async_input，避免和stdin线程冲突
+                password = await async_input("请输入密码", default="", timeout=300, block=True, raw=True, password=True)
                 
                 if not username or not password:
                     console.print("用户名或密码不能为空，将使用手动登录模式", style="red")
@@ -398,8 +528,7 @@ class CCBULearner:
             
             # 等待登录成功后保存凭证
             if not use_saved:
-                console.print("是否保存账号密码以便下次使用？(y/n，默认y) ", style="yellow", end="")
-                save_choice = input().strip().lower()
+                save_choice = await async_input("是否保存账号密码以便下次使用？(y/n，默认y)", default="y", timeout=5)
                 if save_choice != 'n' and save_choice != 'no':
                     self.save_user_credentials(username, password)
             
@@ -475,7 +604,7 @@ class CCBULearner:
             if login_failed and not logged_in:
                 console.print("[yellow]登录失败！[/yellow]")
                 console.print("可能原因：账号/密码错误、网络问题或验证码", style="yellow")
-                retry = input("是否重新输入账号密码重试？(y/n，默认y): ").strip().lower()
+                retry = await async_input("是否重新输入账号密码重试？(y/n，默认y)", default="y", timeout=5)
                 if retry != 'n':
                     for attempt in range(3):
                         console.print(f"[bold blue]第 {attempt+1} 次重试[/bold blue]")
@@ -547,16 +676,14 @@ class CCBULearner:
                         console.print("[yellow]多次重试失败，将使用手动登录模式[/yellow]")
             
             if not logged_in:
-                console.print("[yellow]请手动在浏览器中完成登录，然后按回车键继续[/yellow]")
-                input()
+                await async_input("请手动在浏览器中完成登录，然后按回车键继续", default="", timeout=600, block=True)
             
             console.print("✓ 登录流程完成!", style="bold green")
             
         except Exception as e:
             console.print("自动登录失败", style="red")
             console.print("将使用手动登录模式", style="yellow")
-            console.print("请在浏览器中完成登录后按回车键继续...", style="green")
-            input("")
+            await async_input("请在浏览器中完成登录后按回车键继续", default="", timeout=600, block=True)
 
     async def get_workshops(self, page: Page) -> List[Dict]:
         """获取专题班列表 - 从.card结构提取所有专题班"""
@@ -653,63 +780,130 @@ class CCBULearner:
         return workshops
 
     async def go_to_next_page(self, page: Page) -> bool:
-        """翻到下一页 - 检查按钮是否可用"""
+        """翻到下一页 - 检查按钮是否可用（含frame检测）"""
         try:
             console.print("正在查找下一页按钮...", style="blue")
-            
-            # 方式1: 在分页区域找"下一页"
+
+            # 先等待分页元素出现
             try:
-                # 分页容器结构: div.pager_manu > span.pagetext.hand
+                await page.wait_for_selector("span.pagetext, .pager_manu, .pageinfo, .pagination", timeout=8000)
+            except:
+                debug("等待分页元素超时")
+
+            # 收集所有可搜索的上下文（主页面 + 所有frame）
+            search_contexts = [("main", page)]
+            for frame in page.frames:
+                if frame != page.main_frame:
+                    search_contexts.append((f"frame:{frame.url[:60]}", frame))
+            debug(f"搜索上下文: {len(search_contexts)} 个 ({', '.join(c[0] for c in search_contexts)})")
+
+            # 分页按钮可能是中文"下一页"或英文"Next"
+            NEXT_TEXTS = ["下一页", "Next"]
+
+            # 方式1: 在分页区域找"下一页/Next"
+            try:
                 page_container = page.locator("div.pager_manu, .pageinfo, .pagination, [class*=page]:not(.pageheader):not(.homepage_layout)")
                 container_count = await page_container.count()
-                
+                debug(f"分页容器: {container_count} 个")
+
                 if container_count > 0:
-                    next_btn = page_container.first.locator("text=下一页")
-                    if await next_btn.count() > 0:
-                        btn_class = await next_btn.first.get_attribute("class") or ""
-                        # 禁用态用 "disable" class（注意不是 "disabled"）
-                        if "disable" not in btn_class:
-                            await next_btn.first.click()
-                            await page.wait_for_timeout(5000)
-                            console.print("已翻到下一页", style="green")
-                            return True
-                        else:
-                            console.print("下一页按钮不可用（disable），已到最后一页", style="yellow")
-                            return False
+                    for nxt in NEXT_TEXTS:
+                        next_btn = page_container.first.locator(f"text={nxt}")
+                        btn_count = await next_btn.count()
+                        debug(f"方式1: 找到 {btn_count} 个'{nxt}'元素")
+                        if btn_count > 0:
+                            btn_class = await next_btn.first.get_attribute("class") or ""
+                            debug(f"方式1: class=[{btn_class}]")
+                            if "disable" not in btn_class:
+                                await next_btn.first.click()
+                                await page.wait_for_timeout(5000)
+                                console.print("已翻到下一页", style="green")
+                                return True
+                            else:
+                                console.print("下一页按钮不可用（disable），已到最后一页", style="yellow")
+                                return False
             except Exception as e1:
-                pass
-            
-            # 方式2: 查找span.pagetext.hand的"下一页"元素
-            try:
-                next_spans = page.locator("span.pagetext").filter(has_text="下一页")
-                if await next_spans.count() > 0:
-                    cls = await next_spans.first.get_attribute("class") or ""
-                    if "disable" not in cls and await next_spans.first.is_visible():
-                        await next_spans.first.click()
-                        await page.wait_for_timeout(5000)
-                        console.print("已翻到下一页", style="green")
-                        return True
-            except:
-                pass
-            
-            # 方式3: 直接查找可点击的"下一页"元素
-            try:
-                next_els = page.locator("a, button, span, li").filter(has_text="下一页")
-                count = await next_els.count()
-                for i in range(count):
-                    el = next_els.nth(i)
-                    cls_str = (await el.get_attribute("class")) or ""
-                    is_disabled = await el.get_attribute("disabled")
-                    has_disable = "disable" in cls_str
-                    is_visible = await el.is_visible()
-                    if is_visible and not is_disabled and not has_disable:
-                        await el.click()
-                        await page.wait_for_timeout(5000)
-                        console.print("已翻到下一页", style="green")
-                        return True
-            except:
-                pass
-            
+                debug(f"方式1异常: {e1}")
+
+            # 方式2: 查找span.pagetext的"下一页/Next"元素（在所有上下文中搜索）
+            for ctx_name, ctx in search_contexts:
+                for nxt in NEXT_TEXTS:
+                    try:
+                        next_spans = ctx.locator("span.pagetext").filter(has_text=nxt)
+                        sc = await next_spans.count()
+                        debug(f"方式2[{ctx_name}]: span.pagetext '{nxt}' 找到 {sc} 个")
+                        if sc > 0:
+                            cls = await next_spans.first.get_attribute("class") or ""
+                            visible = await next_spans.first.is_visible()
+                            debug(f"方式2[{ctx_name}]: class=[{cls}] visible={visible}")
+                            if "disable" not in cls and visible:
+                                await next_spans.first.click()
+                                await page.wait_for_timeout(5000)
+                                console.print("已翻到下一页", style="green")
+                                return True
+                    except Exception as e2:
+                        debug(f"方式2[{ctx_name}]异常: {e2}")
+
+            # 方式3: 直接查找可点击的"下一页/Next"元素（在所有上下文中搜索）
+            for ctx_name, ctx in search_contexts:
+                for nxt in NEXT_TEXTS:
+                    try:
+                        next_els = ctx.locator("a, button, span, li").filter(has_text=nxt)
+                        count = await next_els.count()
+                        debug(f"方式3[{ctx_name}]: 找到 {count} 个含'{nxt}'的元素")
+                        for i in range(count):
+                            el = next_els.nth(i)
+                            cls_str = (await el.get_attribute("class")) or ""
+                            is_disabled = await el.get_attribute("disabled")
+                            has_disable = "disable" in cls_str
+                            is_visible = await el.is_visible()
+                            tag = await el.evaluate("el => el.tagName")
+                            debug(f"  [{i}] tag={tag} class=[{cls_str}] visible={is_visible} disabled={is_disabled}")
+                            if is_visible and not is_disabled and not has_disable:
+                                await el.click()
+                                await page.wait_for_timeout(5000)
+                                console.print("已翻到下一页", style="green")
+                                return True
+                    except Exception as e3:
+                        debug(f"方式3[{ctx_name}]异常: {e3}")
+
+            # 方式4: 兜底 - dump页面中所有含"下一页/Next"的元素
+            for nxt in NEXT_TEXTS:
+                try:
+                    page_els = page.locator("*").filter(has_text=nxt)
+                    pc = await page_els.count()
+                    debug(f"方式4(兜底): 页面中共 {pc} 个含'{nxt}'的元素")
+                    for i in range(min(pc, 10)):
+                        el = page_els.nth(i)
+                        tag = await el.evaluate("el => el.tagName")
+                        cls_str = (await el.get_attribute("class")) or ""
+                        txt = (await el.inner_text())[:50]
+                        debug(f"  [{i}] <{tag}> class=[{cls_str}] text=[{txt}]")
+                except Exception as e4:
+                    debug(f"方式4异常: {e4}")
+
+            # 方式5: dump所有frame中的分页区域innerHTML
+            for ctx_name, ctx in search_contexts:
+                try:
+                    pager_html = await ctx.evaluate("""() => {
+                        const selectors = ['.pager_manu', '.pageinfo', '.pagination',
+                            '[class*=pager]', '[class*=paging]', '[class*=page_num]'];
+                        for (const sel of selectors) {
+                            const el = document.querySelector(sel);
+                            if (el) return sel + ': ' + el.innerHTML.substring(0, 500);
+                        }
+                        // 兜底: 找含"下一页"或"Next"的元素
+                        const all = document.querySelectorAll('*');
+                        for (const el of all) {
+                            if (el.innerText && (el.innerText.includes('下一页') || el.innerText.includes('Next')) && el.children.length < 5)
+                                return 'found: <' + el.tagName + ' class="' + el.className + '">' + el.outerHTML.substring(0, 300);
+                        }
+                        return 'none';
+                    }""")
+                    debug(f"方式5[{ctx_name}]: {pager_html}")
+                except Exception as e5:
+                    debug(f"方式5[{ctx_name}]异常: {e5}")
+
             console.print("未找到可用的下一页按钮，已到最后一页", style="yellow")
             return False
         except Exception as e:
@@ -720,15 +914,10 @@ class CCBULearner:
         table = Table(title="专题班列表")
         table.add_column("序号", style="cyan")
         table.add_column("专题班名称", style="magenta")
-        table.add_column("进度", style="green")
-        
+
         for i, workshop in enumerate(workshops, 1):
-                    table.add_row(
-                str(i),
-                workshop["title"][:60],
-                workshop.get("study_hours", workshop.get("progress", "未知"))
-            )
-        
+            table.add_row(str(i), workshop["title"][:60])
+
         console.print(table)
 
     async def filter_by_tags(self, page: Page):
@@ -809,8 +998,9 @@ class CCBULearner:
         try:
             console.print(f"正在查找并点击专题班: {workshop_title}", style="blue")
             
-            initial_pages_count = len(self.context.pages)
-            
+            # 记录点击前的页面集合，用于检测新标签页
+            existing_page_ids = set(id(p) for p in self.context.pages)
+
             # 查找并点击专题班链接
             workshop_link = None
             # 方法1: 通过卡片中的详细链接点击
@@ -831,26 +1021,28 @@ class CCBULearner:
                             break
                     except:
                         pass
-            
+
             if not workshop_link or (hasattr(workshop_link, 'count') and await workshop_link.count() == 0):
                 console.print("未找到专题班链接", style="red")
                 return False, page
-            
+
             console.print("找到专题班链接，准备点击", style="green")
-            
+
             # 点击链接（SPA 页面，不需要 expect_navigation）
             await workshop_link.click()
-            await page.wait_for_timeout(8000)
-            
+            await page.wait_for_timeout(3000)
+
             debug(f"当前页面URL: {page.url}")
-            
-            # 检查是否打开了新标签页
+
+            # 检查是否打开了新标签页（用集合差集，避免并发时抓错标签页）
             working_page = page
-            if len(self.context.pages) > initial_pages_count:
-                working_page = self.context.pages[-1]
-                await working_page.bring_to_front()
-                await working_page.wait_for_timeout(3000)
-                debug(f"新标签页URL: {working_page.url[:80]}")
+            for p in self.context.pages:
+                if id(p) not in existing_page_ids:
+                    working_page = p
+                    await working_page.bring_to_front()
+                    await working_page.wait_for_timeout(3000)
+                    debug(f"新标签页URL: {working_page.url[:80]}")
+                    break
             
             # 获取页面内容
             page_text = await working_page.locator("body").inner_text(timeout=5000)
@@ -958,11 +1150,7 @@ class CCBULearner:
                 return True, working_page
             else:
                 console.print("报名按钮点击后未检测到变化，手动确认", style="yellow")
-                console.print("报名后按回车键继续（或等待5秒自动继续）...", style="yellow", end="")
-                try:
-                    await asyncio.wait_for(asyncio.get_event_loop().run_in_executor(None, input), timeout=5)
-                except asyncio.TimeoutError:
-                    pass
+                await async_input("报名后按回车键继续（或等待5秒自动继续）", default="", timeout=5)
                 return True, working_page
             
         except Exception as e:
@@ -1017,59 +1205,102 @@ class CCBULearner:
 
 
     async def _set_lowest_quality(self, page: Page):
-        # 静音 + 最低画质 + 2倍速度
+        """静音 + 最低画质 + 2倍速度（JS直接操作 + UI点击双重保障）"""
+
+        # 1) 静音（JS直接设置，最可靠）
         try:
-            # JS静音（最可靠）
             await page.evaluate("() => { const v = document.querySelector('video'); if (v) v.muted = true; }")
         except:
             pass
-        try:
-            # 点击音量按钮静音（兜底）
-            vol_btn = page.locator('.prism-volume, .volume-icon').first
-            if await vol_btn.count() > 0:
-                await vol_btn.click(force=True)
-                await page.wait_for_timeout(300)
-        except:
-            pass
-        try:
-            # hover播放器使控制栏可见
-            try:
-                await page.locator(".prism-player, video, #player_area").first.hover()
-                await page.wait_for_timeout(500)
-            except:
-                pass
-            
-            # 最低画质
-            qbtn = page.locator('.current-quality').first
-            if await qbtn.count() > 0:
-                await qbtn.click(force=True)
-                await page.wait_for_timeout(1500)
-                items = page.locator('.quality-list li')
-                cnt = await items.count()
-                if cnt > 1:
-                    lowest = items.nth(cnt - 1)
-                    text = await lowest.inner_text()
-                    debug(f"画质: {cnt}个, 选: {text.strip()}")
-                    await lowest.click(force=True)
-                    await page.wait_for_timeout(2000)
-        except Exception as _qe:
-            debug(f"画质异常: {_qe}")
 
-        try:
-            # 2倍速度
-            rate_btn = page.locator('.current-rate').first
-            if await rate_btn.count() > 0:
-                cur = (await rate_btn.inner_text()).strip()
-                if '2' not in cur:
-                    await rate_btn.click(force=True)
-                    await page.wait_for_timeout(1500)
-                    opt = page.locator('li[data-rate="2.0"]').first
-                    if await opt.count() > 0:
-                        await opt.click(force=True)
+        # 2) 画质：先尝试JS，失败再UI点击
+        for attempt in range(2):
+            try:
+                if attempt == 0:
+                    # JS方式：遍历画质选项找最低的并点击
+                    result = await page.evaluate("""() => {
+                        const btn = document.querySelector('.current-quality');
+                        if (!btn) return 'no-btn';
+                        btn.click();
+                        return 'clicked';
+                    }""")
+                    if result == 'no-btn':
+                        break
+                    await page.wait_for_timeout(1000)
+                    # 点击最后一个选项（最低画质）
+                    clicked = await page.evaluate("""() => {
+                        const items = document.querySelectorAll('.quality-list li');
+                        if (items.length > 1) {
+                            items[items.length - 1].click();
+                            return items[items.length - 1].innerText.trim();
+                        }
+                        return null;
+                    }""")
+                    if clicked:
+                        debug(f"画质(JS): 选 {clicked}")
+                        await page.wait_for_timeout(1500)
+                        break
+                else:
+                    # UI方式：hover展开控制栏再点击
+                    try:
+                        await page.locator(".prism-player, video, #player_area").first.hover()
                         await page.wait_for_timeout(500)
-                        debug("✅ 已设为2倍速度")
-        except Exception as _se:
-            debug(f"倍速异常: {_se}")
+                    except:
+                        pass
+                    qbtn = page.locator('.current-quality').first
+                    if await qbtn.count() > 0:
+                        await qbtn.click(force=True)
+                        await page.wait_for_timeout(1000)
+                        # 等待下拉菜单可见
+                        try:
+                            await page.locator('.quality-list li').last.wait_for(state="visible", timeout=3000)
+                        except:
+                            pass
+                        items = page.locator('.quality-list li')
+                        cnt = await items.count()
+                        if cnt > 1:
+                            lowest = items.nth(cnt - 1)
+                            text = await lowest.inner_text()
+                            debug(f"画质(UI): {cnt}个, 选 {text.strip()}")
+                            await lowest.click(force=True)
+                            await page.wait_for_timeout(1500)
+            except Exception as _qe:
+                debug(f"画质异常(attempt={attempt}): {_qe}")
+
+        # 3) 倍速：必须用UI点击（服务器需要收到事件才能正确计算进度）
+        for attempt in range(3):
+            try:
+                # hover展开控制栏
+                try:
+                    await page.locator(".prism-player, video, #player_area").first.hover()
+                    await page.wait_for_timeout(500)
+                except:
+                    pass
+                rate_btn = page.locator('.current-rate').first
+                if await rate_btn.count() == 0:
+                    debug("倍速: 未找到速率按钮")
+                    break
+                cur = (await rate_btn.inner_text()).strip()
+                if cur.startswith('2'):
+                    debug("倍速: 已经是2x")
+                    break
+                # 点击展开下拉
+                await rate_btn.click(force=True)
+                await page.wait_for_timeout(800)
+                # 等待选项可见
+                opt = page.locator('li[data-rate="2.0"]').first
+                try:
+                    await opt.wait_for(state="visible", timeout=3000)
+                except:
+                    pass
+                if await opt.count() > 0:
+                    await opt.click(force=True)
+                    debug(f"倍速: 已设为2x (attempt={attempt})")
+                    await page.wait_for_timeout(500)
+                    break
+            except Exception as _se:
+                debug(f"倍速异常(attempt={attempt}): {_se}")
+                await page.wait_for_timeout(1000)
 
 
     async def _check_video_progress(self, page: Page) -> float:
@@ -1117,52 +1348,53 @@ class CCBULearner:
 
         return -1
 
-    async def find_and_play_video(self, page: Page, worker_id: int):
+    async def find_and_play_video(self, page: Page, worker_id: int, progress_callback=None):
         # 查找并播放视频，监控进度到100%
         try:
             debug(f"[工作线程 {worker_id+1}] 正在查找视频元素...")
 
-            for sel in ["video", "audio", "[class*='video']", "[class*='audio']", ".prism-player"]:
-                try:
-                    v = await page.query_selector(sel)
-                    if v:
-                        debug(f"[工作线程 {worker_id+1}] 找到视频元素: {sel}")
-                        try:
-                            await v.click()
-                        except:
-                            pass
-                        try:
-                            await page.evaluate("v => { try { v.play(); } catch(e) {} }", v)
-                        except:
-                            pass
-                        break
-                except:
-                    pass
-            else:
-                console.print(f"[工作线程 {worker_id+1}] 未找到视频", style="yellow")
+            # 等待视频元素出现（最多等20秒）
+            video_found = False
+            for attempt in range(4):
+                for sel in ["video", "audio", "[class*='video']", "[class*='audio']", ".prism-player"]:
+                    try:
+                        v = await page.query_selector(sel)
+                        if v:
+                            debug(f"[工作线程 {worker_id+1}] 找到视频元素: {sel}")
+                            try:
+                                await v.click()
+                            except:
+                                pass
+                            try:
+                                await page.evaluate("v => { try { v.play(); } catch(e) {} }", v)
+                            except:
+                                pass
+                            video_found = True
+                            break
+                    except:
+                        pass
+                if video_found:
+                    break
+                await page.wait_for_timeout(5000)
+
+            if not video_found:
+                debug(f"[工作线程 {worker_id+1}] 未找到视频")
                 return False
 
-            console.print(f"[工作线程 {worker_id+1}] 监控学习进度...", style="green")
             await self._set_lowest_quality(page)
 
             for check in range(120):
                 await asyncio.sleep(30)
                 progress = await self._check_video_progress(page)
                 if isinstance(progress, (int, float)) and progress >= 0:
+                    if progress_callback:
+                        progress_callback(progress)
                     if progress >= 100:
-                        console.print(f"[工作线程 {worker_id+1}] 学习进度: {progress:.0f}% 完成!", style="bold green")
                         return True
-                    if check % 2 == 0:
-                        console.print(f"[工作线程 {worker_id+1}] 学习进度: {progress:.0f}%", style="blue")
-                elif check % 2 == 0:
-                    console.print(f"[工作线程 {worker_id+1}] 学习中 (第 {(check+1)*30}s)", style="yellow")
 
-            console.print(f"[工作线程 {worker_id+1}] 学习时长达到上限，结束", style="yellow")
             return True
         except Exception as e:
             debug(f"[工作线程 {worker_id+1}] 视频播放异常: {e}")
-            import traceback
-            traceback.print_exc()
             return False
 
 
@@ -1171,7 +1403,12 @@ class CCBULearner:
         courses = []
         try:
             debug("正在获取课程列表...")
-            await page.wait_for_timeout(3000)
+            # 先等表格出现（最多10秒）
+            try:
+                await page.wait_for_selector("tr.text-center", timeout=10000)
+            except:
+                debug("等待课程表格超时")
+            await page.wait_for_timeout(2000)
 
             rows_data = await page.evaluate("""() => {
                 const results = [];
@@ -1181,13 +1418,18 @@ class CCBULearner:
                     const typeCell = cells[0].querySelector('.course-type');
                     const pct = cells[4].querySelector('.percent-text');
                     const actionSpan = cells[5].querySelector('.edit-block');
+                    // 提取课程唯一标识：优先用链接href，其次用data-id，最后用行索引
+                    const link = cells[1].querySelector('a') || tr.querySelector('a[href*="course"]');
+                    const href = link ? link.getAttribute('href') : '';
+                    const dataId = tr.getAttribute('data-id') || tr.getAttribute('data-course-id') || '';
                     results.push({
                         type: typeCell ? typeCell.innerText.trim() : cells[0].innerText.trim(),
                         title: cells[1].innerText.trim(),
                         required: cells[2].innerText.trim(),
                         hours: cells[3].innerText.trim(),
                         progress: pct ? pct.innerText.trim() : cells[4].innerText.trim(),
-                        action: actionSpan ? actionSpan.innerText.trim() : cells[5].innerText.trim()
+                        action: actionSpan ? actionSpan.innerText.trim() : cells[5].innerText.trim(),
+                        url: href || dataId || ''
                     });
                 });
                 return results;
@@ -1202,6 +1444,12 @@ class CCBULearner:
                     continue
                 if title and len(title) > 3:
                     courses.append(row)
+
+            # debug: 打印所有 action 值帮助排查
+            action_vals = set(c.get('action', '') for c in courses)
+            debug(f"课程 action 值: {action_vals}")
+            if courses:
+                debug(f"前3门课程 action: {[(c['title'][:30], c['action']) for c in courses[:3]]}")
 
             console.print(f"课程列表: {len(courses)} 门", style="green")
         except Exception as e:
@@ -1241,10 +1489,9 @@ class CCBULearner:
         
         # 统计
         total = len(courses)
-        to_learn = sum(1 for c in courses if c.get('action', '') == '立即学习')
-        learning = sum(1 for c in courses if c.get('action', '') == '继续学习')
-        done = sum(1 for c in courses if c.get('action', '') == '立即回看' or c.get('progress', '').rstrip('%').isdigit() and int(c.get('progress', '0').rstrip('%')) >= 100)
-        console.print(f"总计 {total} 门，待学习 {to_learn} 门，学习中 {learning} 门，已完成 {done} 门", 
+        to_learn = sum(1 for c in courses if self._is_learnable(c.get('action', '')))
+        done = total - to_learn
+        console.print(f"总计 {total} 门，可学习 {to_learn} 门，已完成 {done} 门",
                      style="bold blue")
 
 
@@ -1295,8 +1542,7 @@ class CCBULearner:
         await page.wait_for_timeout(5000)
 
         # 课程列表交互式筛选（与专题班标签同结构）
-        console.print("是否筛选课程？(y/n，默认n)（5秒后自动: n）: ", style="yellow", end="")
-        _fk = input().strip().lower()
+        _fk = await async_input("是否筛选课程？(y/n，默认n)", default="n", timeout=5)
         if _fk in ('y', 'yes'):
             await page.wait_for_timeout(2000)
             # 提取tag-second过滤项
@@ -1309,8 +1555,7 @@ class CCBULearner:
                     _txt = (await _fitems.nth(_fi).inner_text()).strip()
                     console.print(f"  [{_fi+1:3d}] {_txt[:25]}", style="white")
                     _all_flt.append(_fitems.nth(_fi))
-                console.print("输入编号（逗号分隔，回车跳过）: ", style="yellow", end="")
-                _sel = input().strip()
+                _sel = await async_input("输入编号（逗号分隔，回车跳过）", default="", timeout=30)
                 for _part in _sel.split(","):
                     _part = _part.strip()
                     if _part.isdigit() and 1 <= int(_part) <= len(_all_flt):
@@ -1335,15 +1580,13 @@ class CCBULearner:
                     _lt = (await _pn.nth(_tp - 1).inner_text()).strip()
                     if _lt.isdigit():
                         console.print(f"当前显示约 {_lt} 页", style="blue")
-                        console.print("获取前几页？(回车=1，0=全部): ", style="yellow", end="")
-                        _ip = input().strip()
+                        _ip = await async_input("获取前几页？(回车=1，0=全部)", default="1", timeout=10)
                         _max_page = int(_lt) if _ip == "0" else (int(_ip) if _ip.isdigit() and int(_ip) > 0 else 1)
         except:
             debug("未检测到分页控件，尝试文本检测")
             _body = await page.locator("body").inner_text()
-            if "下一页" in _body or "下一页" in _body:
-                console.print("检测到分页，获取前几页？(回车=1，0=全部): ", style="yellow", end="")
-                _ip = input().strip()
+            if "下一页" in _body or "Next" in _body:
+                _ip = await async_input("检测到分页，获取前几页？(回车=1，0=全部)", default="1", timeout=10)
                 _max_page = 999 if _ip == "0" else (int(_ip) if _ip.isdigit() and int(_ip) > 0 else 1)
             else:
                 debug("页面无分页")
@@ -1376,8 +1619,7 @@ class CCBULearner:
             console.print(f"  [{i:3d}] {c['title']}", style="white")
 
         console.print()
-        console.print("输入课程编号（逗号/范围分隔，回车全学）: ", style="yellow", end="")
-        sel = input().strip()
+        sel = await async_input("输入课程编号（逗号/范围分隔，回车全学）", default="", timeout=30)
         indices = list(range(len(courses_data)))
         if sel:
             indices = []
@@ -1444,133 +1686,600 @@ class CCBULearner:
         await asyncio.gather(*tasks)
         console.print("课程模式学习完成", style="bold green")
 
-    async def parallel_learn_courses(self, workshop_id: str, courses: List[Dict]):
-        # 每个工作线程独立操作：导航到专题班页 → 点击课程 → 处理弹窗 → 播放视频
-        to_learn = [(i, c) for i, c in enumerate(courses) if c.get('action', '') in ('立即学习', '继续学习')]
-        if not to_learn:
-            console.print("没有需要学习的课程", style="green")
-            return
+    @staticmethod
+    def _is_learnable(action: str) -> bool:
+        """判断课程是否可以学习（未完成或进行中）"""
+        if not action:
+            return False
+        # 100%完成 → 不需要学
+        if action in ('立即回看', '学习完成', '已完成'):
+            return False
+        # 明确可学的状态
+        if action in ('立即学习', '继续学习', '继续回看',
+                       '开始学习', '进入课程', '学习课程'):
+            return True
+        # 含"学习"但不含"完成"
+        if '学习' in action and '完成' not in action:
+            return True
+        return False
 
-        num_workers = min(self.workers, len(to_learn))
-        console.print(f"[bold]使用 {num_workers} 个工作线程并行学习 {len(to_learn)} 门课程[/bold]")
+    async def _collect_workshops_courses(self, page: Page, workshops: List[Dict],
+                                          completed_ids: set = None) -> tuple:
+        """预收集：并行 enroll + 获取课程列表，跳过已完成的专题班"""
+        if completed_ids is None:
+            completed_ids = set()
 
-        workshop_url = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={workshop_id}"
+        to_process = list(workshops)
 
-        async def worker_flow(w_id: int, page: Page, assigned: List):
-            for course_idx, (global_idx, course) in enumerate(assigned):
-                title = course['title'][:40]
-                console.print(f"[工作线程 {w_id+1}] [{course_idx+1}/{len(assigned)}] {title}", style="bold blue")
+        if completed_ids:
+            console.print(f"  已完成 {len(completed_ids)} 个专题班，将跳过", style="green")
 
-                # 1) 导航到专题班页
+        all_tasks = []       # [(ws_id, course_idx, course_info, ws_title), ...]
+        ws_locks = {}        # ws_id -> asyncio.Lock
+
+        # 每个collector用独立页面，避免并发干扰
+        COLLECT_CONCURRENCY = 10
+        collect_pages = []
+        for _ in range(COLLECT_CONCURRENCY):
+            try:
+                collect_pages.append(await self.context.new_page())
+            except:
+                pass
+
+        console.print(f"  使用 {len(collect_pages)} 个页面并行采集", style="blue")
+
+        # 每个采集页都先导航到专题班列表
+        async def init_collect_page(cp):
+            try:
+                await cp.goto("https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
+                              wait_until="networkidle", timeout=20000)
+                await cp.wait_for_timeout(3000)
+                if self.tags_to_learn:
+                    for tag in self.tags_to_learn:
+                        try:
+                            all_tags = cp.locator("ul.tag-tree-list span.single-tag")
+                            cnt = await all_tags.count()
+                            for i in range(cnt):
+                                text = (await all_tags.nth(i).inner_text()).strip()
+                                if text == tag:
+                                    await all_tags.nth(i).click()
+                                    await cp.wait_for_timeout(3000)
+                                    break
+                        except:
+                            pass
+            except:
+                pass
+
+        await asyncio.gather(*(init_collect_page(cp) for cp in collect_pages))
+
+        sem = asyncio.Semaphore(COLLECT_CONCURRENCY)
+
+        async def collect_one(idx: int, ws: dict, cp: Page):
+            """单个专题班：直接用URL导航 + 获取课程（在自己的页面上执行，不开新标签页）"""
+            ws_title = ws['title'][:50]
+            async with sem:
+                console.print(f"[采集 {idx+1}/{len(to_process)}] {ws_title}", style="blue")
+
+                # 从 detail_link 提取 workshop ID
+                detail_link = ws.get('detail_link', '')
+                ws_id = ""
+                m = re.search(r'id=([a-f0-9\-]+)', detail_link)
+                if m:
+                    ws_id = m.group(1)
+                if not ws_id:
+                    console.print(f"  ✗ 无法从链接提取ID: {detail_link[:60]}", style="red")
+                    return None
+
+                # 检查是否已完成
+                if ws_id in completed_ids:
+                    console.print(f"  ⊘ 已完成，跳过: {ws_title[:30]}", style="green")
+                    return None
+
+                # 直接导航到专题班详情页（用自己的cp页面，不开新标签页）
+                # 注意: SPA hash路由切换不会触发页面重载，必须reload才能刷新内容
+                ws_url = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
                 try:
-                    await page.goto(workshop_url, wait_until="networkidle", timeout=20000)
-                    await page.wait_for_selector("tr.text-center", timeout=15000)
-                    await page.wait_for_timeout(3000)
-                except:
-                    debug(f"[工作线程 {w_id+1}] 页面加载失败，跳过")
-                    continue
-
-                # 2) 在表格中找到课程并点击（会打开新标签页）
-                rows = page.locator("tr.text-center")
-                if global_idx >= await rows.count():
-                    continue
-                row = rows.nth(global_idx)
-                btn = row.locator("span.edit-block").first
-                if await btn.count() == 0:
-                    continue
-
-                try:
-                    async with page.expect_event("popup", timeout=20000) as pi:
-                        await btn.click()
-                    course_page = await pi.value
-                    await course_page.wait_for_load_state()
-                    debug(f"[工作线程 {w_id+1}] 打开课程标签页")
-                except:
-                    debug(f"[工作线程 {w_id+1}] 未打开课程标签页，跳过")
-                    continue
-
-                # 3) 在课程页找学习按钮
-                for kw in ["我要学习", "开始学习", "进入课程", "继续学习", "学习课程", "进入课程学习"]:
+                    await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
+                    await cp.reload(wait_until="networkidle", timeout=15000)
+                    await cp.wait_for_timeout(3000)
+                except Exception as e:
+                    debug(f"  导航异常: {e}")
                     try:
-                        await course_page.wait_for_selector(f"text={kw}", timeout=10000)
-                        sb = course_page.locator(f"text={kw}").first
-                        if await sb.count() > 0:
-                            debug(f"[工作线程 {w_id+1}] 找到「{kw}」")
-                            await sb.click()
-                            await course_page.wait_for_timeout(5000)
+                        await cp.reload(wait_until="networkidle", timeout=20000)
+                        await cp.wait_for_timeout(5000)
+                    except:
+                        pass
+
+                # 检查是否需要报名（页面上有"立即报名"按钮）
+                need_enroll = False
+                for kw in ["立即报名", "加入学习", "免费报名"]:
+                    try:
+                        btn = cp.locator(f"text={kw}").first
+                        if await btn.count() > 0 and await btn.is_visible():
+                            console.print(f"  需要报名，点击「{kw}」", style="blue")
+                            await btn.click()
+                            await cp.wait_for_timeout(5000)
+                            need_enroll = True
                             break
                     except:
                         pass
 
-                # 4) 播放视频（在课程标签页上）
-                await self.find_and_play_video(course_page, w_id)
+                # 报名后重新导航到详情页
+                if need_enroll:
+                    try:
+                        await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
+                        await cp.wait_for_timeout(3000)
+                    except:
+                        pass
 
-                # 5) 关闭课程标签页
+                # 获取课程列表（重试5次）
+                courses = []
+                for attempt in range(5):
+                    if attempt > 0:
+                        console.print(f"  第 {attempt+1} 次获取课程...", style="yellow")
+                        try:
+                            await cp.reload(wait_until="networkidle")
+                            await cp.wait_for_timeout(5000)
+                        except:
+                            pass
+                    courses = await self.get_courses_from_workshop(cp)
+                    if courses:
+                        break
+
+                if courses:
+                    to_learn = [(i, c) for i, c in enumerate(courses)
+                                if self._is_learnable(c.get('action', ''))]
+                    # debug: 记录 action 值
+                    action_vals = set(c.get('action', '') for c in courses)
+                    debug(f"  课程action值: {action_vals}, 待学: {len(to_learn)}")
+                    # 0门待学 → 该专题班已完成，立即标记
+                    if not to_learn:
+                        if ws_id not in completed_ids:
+                            completed_ids.add(ws_id)
+                            self.mark_workshop_completed(ws_id)
+                            debug(f"  标记已完成: {ws_id}")
+                        console.print(f"  ✓ 全部已完成（共{len(courses)}门）", style="green")
+                    else:
+                        console.print(f"  ✓ {len(to_learn)} 门待学（共{len(courses)}门）", style="green")
+                    return {
+                        "ws_id": ws_id,
+                        "ws_title": ws_title,
+                        "tasks": [(ws_id, ci, c, ws_title) for ci, c in to_learn],
+                        "courses": courses
+                    }
+                else:
+                    console.print(f"  ✗ 未获取到课程", style="yellow")
+                    return None
+
+        # 并行执行所有采集任务
+        console.print(f"\n开始并行采集 {len(to_process)} 个专题班...", style="bold blue")
+        results = await asyncio.gather(
+            *(collect_one(i, ws, collect_pages[i % len(collect_pages)])
+              for i, ws in enumerate(to_process)),
+            return_exceptions=True
+        )
+
+        # 汇总结果
+        for r in results:
+            if isinstance(r, Exception):
+                debug(f"采集异常: {r}")
+                continue
+            if r is None:
+                continue
+            ws_id = r["ws_id"]
+            for t in r["tasks"]:
+                all_tasks.append(t)
+            if ws_id not in ws_locks:
+                ws_locks[ws_id] = asyncio.Lock()
+
+        # 关闭所有采集页面
+        for cp in collect_pages:
+            try:
+                await cp.close()
+            except:
+                pass
+
+        # 确保主页面回到列表页
+        try:
+            await page.goto("https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
+                            wait_until="networkidle", timeout=15000)
+            await page.wait_for_timeout(3000)
+        except:
+            pass
+
+        return all_tasks, ws_locks
+
+    async def parallel_learn_courses(self, all_tasks: List, ws_locks: Dict):
+        """全局课程队列：所有 worker 跨专题班并发消费，自动标记已完成专题班"""
+        if not all_tasks:
+            console.print("没有需要学习的课程", style="green")
+            return set()
+
+        num_workers = min(self.workers, len(all_tasks))
+        console.print(f"\n[bold]启动 {num_workers} 个工作线程，共 {len(all_tasks)} 门课程[/bold]")
+
+        # 共享的线程状态（用于Live表格显示）
+        worker_status = {}
+        status_lock = asyncio.Lock()
+        study_hours_info = {"central": 0, "online": 0, "updated": "未查询"}
+        # 心跳：记录每个worker最后活动时间
+        worker_heartbeat = {}  # {w_id: timestamp}
+        HEARTBEAT_TIMEOUT = 600  # 10分钟无进展判定卡死
+        # 当前任务信息（用于超时重试）
+        worker_current_task = {}  # {w_id: (ws_id, cidx, course, ws_title, retry)}
+        worker_cancel_event = {}  # {w_id: asyncio.Event}
+        # 进度追踪：记录每个worker的(时间戳, 百分比)用于预估剩余时间
+        worker_progress_history = {}  # {w_id: [(timestamp, pct), ...]}
+
+        def update_status(w_id, **kwargs):
+            """更新线程状态（线程安全）+ 心跳 + 进度追踪"""
+            worker_status.setdefault(w_id, {}).update(kwargs)
+            worker_heartbeat[w_id] = time.time()
+            # 记录进度变化
+            pct_str = kwargs.get("progress", "")
+            if pct_str and pct_str != "-":
                 try:
-                    await course_page.close()
+                    pct_val = float(pct_str.replace("%", ""))
+                    history = worker_progress_history.setdefault(w_id, [])
+                    history.append((time.time(), pct_val))
+                    # 只保留最近10条记录
+                    if len(history) > 10:
+                        worker_progress_history[w_id] = history[-10:]
                 except:
                     pass
 
-                # 检查学习目标（专题班模式→集中培训）
-                if self.study_goal > 0 and not self.goal_reached:
-                    _h = await self._get_study_hours(page)
-                    _cur = _h.get("central", 0)
-                    console.print(f"集中培训: {_cur:.1f}/{self.study_goal} 学时", style="blue")
-                    if _cur >= self.study_goal:
-                        console.print("已达到学习目标! 程序退出", style="bold green")
-                        import sys
-                        sys.exit(0)
-                        
-        lesson_queue = asyncio.Queue()
-        tasks = []
-        for w_id in range(num_workers):
-            assigned = [to_learn[j] for j in range(w_id, len(to_learn), num_workers)]
-            tasks.append(asyncio.create_task(worker_flow(w_id, self.pages[w_id], assigned)))
-            await asyncio.sleep(3)
+        def estimate_remaining(w_id):
+            """根据进度变化率预估剩余时间（平滑计算）"""
+            history = worker_progress_history.get(w_id, [])
+            status = worker_status.get(w_id, {}).get("status", "")
 
-        # 创建处理课程包的工作线程
-        async def bundle_worker(bw_id: int, bpage: Page, btotal: int):
+            # 没有历史记录
+            if not history:
+                return "..." if status == "学习中" else "-"
+
+            # 已完成
+            if history[-1][1] >= 100:
+                return "✓"
+
+            # 只有1条记录，用任务开始时间估算
+            if len(history) < 2:
+                start_time = worker_heartbeat.get(w_id, 0)
+                if start_time > 0 and history[-1][1] > 0:
+                    elapsed = time.time() - start_time
+                    rate = history[-1][1] / elapsed
+                    if rate > 0:
+                        remaining = (100 - history[-1][1]) / rate
+                        return _format_time(remaining)
+                return "..." if status == "学习中" else "-"
+
+            # 多条记录：用线性回归计算平均速率
+            t0, p0 = history[0]
+            t_last, p_last = history[-1]
+            dt = t_last - t0
+            dp = p_last - p0
+
+            if dt <= 0:
+                return "..." if status == "学习中" else "-"
+
+            # 进度没变化但还在学习中
+            if dp <= 0:
+                if status == "学习中":
+                    return "计算中..."
+                return "-"
+
+            rate = dp / dt
+            if rate <= 0:
+                return "-"
+
+            remaining = (100 - p_last) / rate
+            return _format_time(remaining)
+
+        def _format_time(seconds):
+            """格式化时间显示"""
+            if seconds < 60:
+                return f"{seconds:.0f}s"
+            elif seconds < 3600:
+                return f"{seconds/60:.1f}m"
+            else:
+                return f"{seconds/3600:.1f}h"
+
+        def make_progress_table():
+            # 学时信息面板
+            hours_table = Table(title="培训学时", show_header=False, box=None, padding=(0, 2))
+            hours_table.add_column("项目", style="cyan")
+            hours_table.add_column("数值", style="green")
+            h = study_hours_info
+            hours_table.add_row("集中培训", f"{h['central']:.1f} 学时")
+            hours_table.add_row("网络自学", f"{h['online']:.1f} 学时")
+            if self.study_goal > 0:
+                goal_type_name = "集中培训" if self.goal_type == "central" else "网络自学"
+                cur = h.get(self.goal_type, 0)
+                pct = min(100, cur / self.study_goal * 100) if self.study_goal > 0 else 0
+                bar = "█" * int(pct // 5) + "░" * (20 - int(pct // 5))
+                hours_table.add_row("目标", f"{goal_type_name} {self.study_goal:.0f} 学时")
+                hours_table.add_row("进度", f"[{'bold green' if pct >= 100 else 'yellow'}]{bar} {pct:.1f}%[/]")
+            hours_table.add_row("更新时间", h['updated'])
+
+            # 线程进度表
+            table = Table(title=f"学习进度（完成 {completed_count[0]}/{total}，失败 {failed[0]}）")
+            table.add_column("线程", style="cyan", width=4)
+            table.add_column("课程", style="white", width=36)
+            table.add_column("进度", style="green", width=6)
+            table.add_column("预计", style="magenta", width=6)
+            table.add_column("状态", style="yellow", width=10)
+            for wid in range(num_workers):
+                info = worker_status.get(wid, {})
+                eta = estimate_remaining(wid) if info.get("status") == "学习中" else "-"
+                table.add_row(
+                    str(wid + 1),
+                    info.get("course", "-"),
+                    info.get("progress", "-"),
+                    eta,
+                    info.get("status", "等待中")
+                )
+            # 合并两个表
+            from rich.console import Group
+            return Group(hours_table, table)
+
+        # 构建任务队列（每个任务带重试计数）
+        MAX_RETRY = 3
+        course_queue = asyncio.Queue()
+        seen_courses = set()  # 去重：已见过的课程URL
+        dedup_count = 0
+        for t in all_tasks:
+            ws_id, cidx, course, ws_title = t
+            # 用URL去重，没有URL则用标题
+            dedup_key = course.get('url', '') or course['title'].strip()[:50]
+            if dedup_key and dedup_key in seen_courses:
+                dedup_count += 1
+                # 重复课程直接标记完成（不入队）
+                if ws_id not in ws_progress:
+                    ws_progress[ws_id] = {"total": 0, "done": 0, "title": ws_title}
+                ws_progress[ws_id]["total"] += 1
+                ws_progress[ws_id]["done"] += 1
+                continue
+            if dedup_key:
+                seen_courses.add(dedup_key)
+            course_queue.put_nowait((*t, 0))  # (ws_id, cidx, course, ws_title, retry)
+        if dedup_count > 0:
+            console.print(f"  去重: 跳过 {dedup_count} 门重复课程", style="yellow")
+
+        # 进度统计
+        total = len(all_tasks)
+        completed_count = [0]
+        failed = [0]
+        lock_stat = asyncio.Lock()
+
+        # 按专题班统计完成情况：{ws_id: {"total": N, "done": N, "title": str}}
+        ws_progress = {}
+        for ws_id, cidx, course, ws_title in all_tasks:
+            if ws_id not in ws_progress:
+                ws_progress[ws_id] = {"total": 0, "done": 0, "title": ws_title}
+            ws_progress[ws_id]["total"] += 1
+        completed_ws_ids = set()
+
+        def retry_task(ws_id, cidx, course, ws_title, retry):
+            """失败任务放回队列重试"""
+            if retry < MAX_RETRY:
+                course_queue.put_nowait((ws_id, cidx, course, ws_title, retry + 1))
+                update_status(w_id, status=f"重试({retry+1}/{MAX_RETRY})")
+                return True
+            return False
+
+        async def worker(w_id: int, page: Page):
+            """单个工作线程：从队列取任务，独立完成学习"""
+            cancel_event = asyncio.Event()
+            worker_cancel_event[w_id] = cancel_event
+
             while True:
-                item = await lesson_queue.get()
-                if item is None:
-                    lesson_queue.task_done()
-                    break
-                _, b_url, li = item
-                console.print(f"[工作线程 {bw_id+1}] 课程包课时 #{li+1}", style="bold blue")
                 try:
-                    await bpage.goto(b_url, wait_until="networkidle", timeout=20000)
-                    await bpage.wait_for_timeout(5000)
-                    # 点击课时（点击后弹窗自动跳转到视频页）
-                    less_el = bpage.locator(".lesson-name").nth(li)
-                    if await less_el.count() == 0:
-                        lesson_queue.task_done()
-                        continue
-                    async with bpage.expect_event("popup", timeout=20000) as pi:
-                        await less_el.click()
-                    video_page = await pi.value
-                    await video_page.wait_for_load_state()
-                    await self.find_and_play_video(video_page, bw_id)
+                    ws_id, cidx, course, ws_title, retry = course_queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+
+                title = course['title'][:40]
+                ws_url = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
+                # 记录当前任务（供心跳超时重试）
+                worker_current_task[w_id] = (ws_id, cidx, course, ws_title, retry)
+                cancel_event.clear()
+
+                try:
+                    update_status(w_id, course=title, workshop=ws_title[:20], progress="-", status="加载中")
+
+                    # 1) 导航到专题班页（reload确保SPA刷新内容）
                     try:
-                        await video_page.close()
+                        await page.goto(ws_url, wait_until="networkidle", timeout=20000)
+                        await page.reload(wait_until="networkidle", timeout=20000)
+                        await page.wait_for_selector("tr.text-center", timeout=15000)
+                        await page.wait_for_timeout(2000)
+                    except Exception as e:
+                        debug(f"[工作线程 {w_id+1}] 页面加载异常: {traceback.format_exc()}")
+                        if retry_task(ws_id, cidx, course, ws_title, retry):
+                            continue
+                        update_status(w_id, status="加载失败")
+                        async with lock_stat:
+                            failed[0] += 1
+                        continue
+
+                    # 2) 加锁：同一专题班的课程串行点击
+                    course_page = None
+                    async with ws_locks.get(ws_id, asyncio.Lock()):
+                        rows = page.locator("tr.text-center")
+                        row_count = await rows.count()
+                        if cidx >= row_count:
+                            update_status(w_id, status="索引超限")
+                            async with lock_stat:
+                                failed[0] += 1
+                            continue
+
+                        row = rows.nth(cidx)
+                        btn = row.locator("span.edit-block").first
+                        if await btn.count() == 0:
+                            update_status(w_id, status="无按钮")
+                            async with lock_stat:
+                                failed[0] += 1
+                            continue
+
+                        try:
+                            async with page.expect_event("popup", timeout=20000) as pi:
+                                await btn.click()
+                            course_page = await pi.value
+                            await course_page.wait_for_load_state()
+                        except Exception as e:
+                            debug(f"[工作线程 {w_id+1}] popup异常: {traceback.format_exc()}")
+                            if course_page:
+                                try: await course_page.close()
+                                except: pass
+                            if retry_task(ws_id, cidx, course, ws_title, retry):
+                                continue
+                            update_status(w_id, status="打开失败")
+                            async with lock_stat:
+                                failed[0] += 1
+                            continue
+
+                    # 3) 找学习按钮
+                    update_status(w_id, status="查找按钮")
+                    found_btn = False
+                    for kw in ["我要学习", "开始学习", "进入课程", "继续学习", "学习课程", "进入课程学习"]:
+                        try:
+                            await course_page.wait_for_selector(f"text={kw}", timeout=8000)
+                            sb = course_page.locator(f"text={kw}").first
+                            if await sb.count() > 0:
+                                await sb.click()
+                                await course_page.wait_for_timeout(5000)
+                                found_btn = True
+                                break
+                        except:
+                            pass
+
+                    # 4) 播放视频（传入进度回调）
+                    update_status(w_id, status="学习中", progress="0%")
+                    def on_progress(pct):
+                        update_status(w_id, progress=f"{pct:.0f}%", status="学习中")
+                    await self.find_and_play_video(course_page, w_id, on_progress)
+
+                    # 5) 关闭课程标签页
+                    try:
+                        await course_page.close()
                     except:
                         pass
+
+                    # 6) 更新进度 + 检查专题班是否全部完成
+                    async with lock_stat:
+                        completed_count[0] += 1
+                        wp = ws_progress.get(ws_id)
+                        if wp:
+                            wp["done"] += 1
+                            if wp["done"] >= wp["total"] and ws_id not in completed_ws_ids:
+                                completed_ws_ids.add(ws_id)
+                                self.mark_workshop_completed(ws_id)
+                        update_status(w_id, status="✓ 完成", progress="100%")
+
+                    # 7) 完成一门课后更新学时
+                    try:
+                        _h = await self._get_study_hours(page)
+                        study_hours_info.update({
+                            "central": _h.get("central", 0),
+                            "online": _h.get("online", 0),
+                            "updated": datetime.now().strftime("%H:%M:%S")
+                        })
+                        # 检查是否达标
+                        if self.study_goal > 0:
+                            _cur = _h.get(self.goal_type, 0)
+                            if _cur >= self.study_goal:
+                                update_status(w_id, status="目标达成!")
+                                import sys
+                                sys.exit(0)
+                    except:
+                        pass
+
                 except Exception as e:
-                    debug(f"课时学习异常: {e}")
-                lesson_queue.task_done()
+                    debug(f"[工作线程 {w_id+1}] 未捕获异常:\n{traceback.format_exc()}")
+                    try:
+                        if course_page and not course_page.is_closed():
+                            await course_page.close()
+                    except:
+                        pass
+                    if retry_task(ws_id, cidx, course, ws_title, retry):
+                        continue
+                    update_status(w_id, status="异常")
+                    async with lock_stat:
+                        failed[0] += 1
 
-        # 取当前worker数量
-        bw_num = min(num_workers, 2)
-        bw_tasks = []
-        for bw_id in range(bw_num):
-            bw_tasks.append(asyncio.create_task(bundle_worker(bw_id, self.pages[bw_id], 0)))
+            update_status(w_id, status="已退出", course="-", workshop="-")
 
-        # 等待所有任务完成
-        await asyncio.gather(*tasks)
-        await lesson_queue.join()
-        for _ in range(bw_num):
-            await lesson_queue.put(None)
-        await asyncio.gather(*bw_tasks)
-        console.print("[bold green]所有课程学习任务已完成[/bold green]")
+        # 用 Live 表格实时刷新
+        from rich.live import Live
+        # 启动前先查询一次学时
+        try:
+            _h = await self._get_study_hours(self.pages[0])
+            study_hours_info.update({
+                "central": _h.get("central", 0),
+                "online": _h.get("online", 0),
+                "updated": datetime.now().strftime("%H:%M:%S")
+            })
+        except:
+            pass
+
+        with Live(make_progress_table(), console=console, refresh_per_second=1) as live:
+            # 启动所有 worker
+            tasks = []
+            for w_id in range(num_workers):
+                tasks.append(asyncio.create_task(worker(w_id, self.pages[w_id])))
+                await asyncio.sleep(2)
+
+            # 定期刷新表格 + 心跳检测
+            async def refresh_display():
+                import time
+                while not all(t.done() for t in tasks):
+                    live.update(make_progress_table())
+                    await asyncio.sleep(2)
+                    # 心跳检测：10分钟无进展触发取消重试
+                    now = time.time()
+                    for wid in range(num_workers):
+                        last = worker_heartbeat.get(wid, 0)
+                        if last > 0 and now - last > HEARTBEAT_TIMEOUT:
+                            info = worker_status.get(wid, {})
+                            status = info.get("status", "")
+                            # 只对"学习中"状态的worker触发超时
+                            if status in ("学习中", "查找按钮", "加载中"):
+                                debug(f"[心跳] 工作线程 {wid+1} 超时({now-last:.0f}s)，触发重试")
+                                # 放回队列重试
+                                task_info = worker_current_task.get(wid)
+                                if task_info:
+                                    ws_id, cidx, course, ws_title, retry = task_info
+                                    if retry < MAX_RETRY:
+                                        course_queue.put_nowait((ws_id, cidx, course, ws_title, retry + 1))
+                                        update_status(wid, status=f"超时重试")
+                                        # 关闭当前页面让worker重新开始
+                                        try:
+                                            await self.pages[wid].close()
+                                        except:
+                                            pass
+                                        # 创建新页面
+                                        try:
+                                            self.pages[wid] = await self.context.new_page()
+                                        except:
+                                            pass
+                                    else:
+                                        update_status(wid, status="超时放弃")
+                                        async with lock_stat:
+                                            failed[0] += 1
+                                # 重置心跳避免重复触发
+                                worker_heartbeat[wid] = now
+                live.update(make_progress_table())
+
+            refresh_task = asyncio.create_task(refresh_display())
+            await asyncio.gather(*tasks, return_exceptions=True)
+            refresh_task.cancel()
+            try:
+                await refresh_task
+            except asyncio.CancelledError:
+                pass
+
+        console.print(f"\n[bold green]学习任务完成: 成功 {completed_count[0]} 门, 失败 {failed[0]} 门[/bold green]")
+        console.print(f"已完成 {len(completed_ws_ids)}/{len(ws_progress)} 个专题班", style="green")
+        return completed_ws_ids
 
     async def get_available_tags(self, page: Page) -> Dict[str, List[str]]:
         # 从页面提取所有可见标签，按分类分组
@@ -1684,10 +2393,12 @@ class CCBULearner:
         return 0.0
 
 
-@click.group()
-def cli():
+@click.group(invoke_without_command=True)
+@click.pass_context
+def cli(ctx):
     """建行学习自动学习工具"""
-    pass
+    if ctx.invoked_subcommand is None:
+        ctx.invoke(start)
 
 
 @cli.command()
@@ -1717,12 +2428,10 @@ def start(headless, workers, target_hours, tags):
                     _w, _h = _sw, _sh
                 else:
                     print()
-                    console.print("工作线程数量 (默认1): ", style="yellow", end="")
-                    _wi = input().strip()
+                    _wi = await async_input("工作线程数量 (默认1): ", default="1", timeout=10)
                     if _wi.isdigit() and int(_wi) > 0:
                         _w = int(_wi)
-                    console.print("无头模式 (浏览器不显示界面)？(y/n，默认n): ", style="yellow", end="")
-                    _hi = input().strip().lower()
+                    _hi = await async_input("无头模式 (浏览器不显示界面)？(y/n，默认n)", default="n", timeout=5)
                     _h = _hi in ('y', 'yes')
                     # 保存配置
                     try:
@@ -1733,12 +2442,10 @@ def start(headless, workers, target_hours, tags):
                         pass
             else:
                 print()
-                console.print("工作线程数量 (默认1): ", style="yellow", end="")
-                _wi = input().strip()
+                _wi = await async_input("工作线程数量 (默认1): ", default="1", timeout=10)
                 if _wi.isdigit() and int(_wi) > 0:
                     _w = int(_wi)
-                console.print("无头模式 (浏览器不显示界面)？(y/n，默认n): ", style="yellow", end="")
-                _hi = input().strip().lower()
+                _hi = await async_input("无头模式 (浏览器不显示界面)？(y/n，默认n)", default="n", timeout=5)
                 _h = _hi in ('y', 'yes')
                 try:
                     with open(CONFIG_PATH, "w", encoding="utf-8") as _f:
@@ -1747,15 +2454,23 @@ def start(headless, workers, target_hours, tags):
                 except:
                     pass
         
-        console.print(f"运行配置: 工作线程={_w}, 无头模式={'是' if _h else '否'}", style="blue")
+        # 显示运行配置
+        from rich.panel import Panel
+        config_table = Table(show_header=False, box=None, padding=(0, 2))
+        config_table.add_column("项", style="cyan")
+        config_table.add_column("值", style="green")
+        config_table.add_row("工作线程", str(_w))
+        config_table.add_row("无头模式", "是" if _h else "否")
+        console.print(Panel(config_table, title="[bold]运行配置[/bold]", border_style="blue"))
+
         learner = CCBULearner(headless=_h, workers=_w)
         learner.target_hours = target_hours
         learner.tags_to_learn = list(tags)
-        
+
         try:
             await learner.init()
             await learner.login()
-            
+
             # 学习目标设置
             try:
                 _gc = {}
@@ -1772,32 +2487,44 @@ def start(headless, workers, target_hours, tags):
                         learner.study_goal = _saved_goal
                         learner.goal_type = _saved_type
                 if learner.study_goal <= 0:
-                    console.print("目标类型: 集中培训(c) / 网络自学(w)？(默认c): ", style="yellow", end="")
-                    _gt = input().strip().lower()
+                    _gt = await async_input("目标类型: 集中培训(c) / 网络自学(w)？(默认c)", default="c", timeout=10)
                     learner.goal_type = "online" if _gt in ('w', '网络自学') else "central"
-                    console.print(f"设置学习目标学时数（0=不限制）: ", style="yellow", end="")
-                    _gi = input().strip()
+                    _gm = await async_input("目标模式: 总学时(t) / 还需学时(n)？(默认t)", default="t", timeout=10)
+                    _gi = await async_input("输入学时数（0=不限制）", default="0", timeout=10)
                     if _gi.replace('.', '').isdigit() and float(_gi) > 0:
-                        learner.study_goal = float(_gi)
+                        goal_val = float(_gi)
+                        if _gm in ('n', '还需'):
+                            _h_val = await learner._get_study_hours(learner.pages[0])
+                            _cur = _h_val.get(learner.goal_type, 0)
+                            goal_val = _cur + goal_val
+                        learner.study_goal = goal_val
                         _gc["study_goal"] = learner.study_goal
                         _gc["goal_type"] = learner.goal_type
                         with open(CONFIG_PATH, "w", encoding="utf-8") as _f:
                             json.dump(_gc, _f, ensure_ascii=False, indent=2)
-                        _tn = "集中培训" if learner.goal_type == "central" else "网络自学"
-                        console.print(f"学习目标已保存: {_tn} {learner.study_goal} 学时", style="green")
+
+                # 显示学习目标面板
                 if learner.study_goal > 0:
-                    console.print("查询当前培训学时...", style="blue")
-                    _h = await learner._get_study_hours(learner.pages[0])
+                    _h_val = await learner._get_study_hours(learner.pages[0])
                     _tn = "集中培训" if learner.goal_type == "central" else "网络自学"
-                    _cur = _h.get(learner.goal_type, 0)
-                    console.print(f"当前{_tn}: {_cur:.1f}学时", style="bold blue")
-                    console.print(f"目标: {learner.study_goal} 学时", style="bold blue")
+                    _cur = _h_val.get(learner.goal_type, 0)
+                    _pct = min(100, _cur / learner.study_goal * 100) if learner.study_goal > 0 else 0
+                    _bar = "█" * int(_pct // 5) + "░" * (20 - int(_pct // 5))
+
+                    goal_table = Table(show_header=False, box=None, padding=(0, 2))
+                    goal_table.add_column("项", style="cyan")
+                    goal_table.add_column("值", style="green")
+                    goal_table.add_row("目标类型", _tn)
+                    goal_table.add_row("当前学时", f"{_cur:.1f}")
+                    goal_table.add_row("目标学时", f"{learner.study_goal:.1f}")
+                    goal_table.add_row("完成进度", f"{_bar} {_pct:.1f}%")
+                    console.print(Panel(goal_table, title="[bold]学习目标[/bold]", border_style="green"))
+
                     if _cur >= learner.study_goal and _cur > 0:
-                        console.print(f"当前{_tn}已训 {_cur:.1f} 学时，已达到目标 {learner.study_goal} 学时，无需学习！", style="bold green")
-                        console.print("按回车键退出...", style="yellow")
-                        input()
+                        console.print(f"[bold green]✓ 已达到目标，无需学习！[/bold green]")
+                        await async_input("按回车键退出", default="", timeout=600, block=True)
                         return
-                    
+
             except Exception as _ge:
                 debug(f"学习目标异常: {_ge}")
             
@@ -1806,14 +2533,12 @@ def start(headless, workers, target_hours, tags):
             if learner.study_goal > 0:
                 _tn = "集中培训" if learner.goal_type == "central" else "网络自学"
                 _mode = "1" if learner.goal_type == "central" else "2"
-                console.print(f"目标类型为「{_tn}」，自动选择{'专题班模式' if _mode == '1' else '课程模式'}", style="blue")
+                console.print(f"目标类型「{_tn}」→ 自动选择{'专题班' if _mode == '1' else '课程'}模式", style="blue")
             else:
-                console.print()
                 _mode = await async_input("选择模式: 专题班(1) / 课程列表(2)？(默认1)", default="1", timeout=5)
             if _mode == "2":
                 await learner._course_mode(learner.pages[0])
-                console.print("\n课程模式完成! 按回车键关闭浏览器...", style="yellow")
-                input()
+                await async_input("\n课程模式完成! 按回车键关闭浏览器", default="", timeout=600, block=True)
                 return
             
             # 访问专题班页面
@@ -1823,128 +2548,117 @@ def start(headless, workers, target_hours, tags):
             
             # 根据标签筛选
             if tags:
-                # 通过命令行参数传入的标签
                 learner.tags_to_learn = list(tags)
                 await learner.filter_by_tags(page)
                 await asyncio.sleep(3)
-                # 保存CLI标签供下次使用
                 try:
                     with open(TAGS_STATE_PATH, "w", encoding="utf-8") as _f:
                         json.dump({"tags": list(tags), "source": "cli"}, _f)
                 except:
                     pass
             else:
-                # 尝试加载保存的标签
                 saved_tags = None
                 if os.path.exists(TAGS_STATE_PATH):
                     try:
                         with open(TAGS_STATE_PATH, "r", encoding="utf-8") as _f:
-                            _d = json.load(_f)
-                            saved_tags = _d.get("tags", [])
+                            saved_tags = json.load(_f).get("tags", [])
                     except:
                         pass
-                
+
                 use_tags = []
                 if saved_tags:
-                    console.print(f"发现上次保存的筛选标签: {', '.join(saved_tags)}", style="green")
-                    _c = await async_input("使用(u) / 重新选择(r) / 跳过(s)？(u/r/s，默认u)", default="u", timeout=5)
+                    console.print(f"已保存标签: [cyan]{', '.join(saved_tags)}[/cyan]")
+                    _c = await async_input("使用(u) / 重新选择(r) / 跳过(s)？(默认u)", default="u", timeout=5)
                     if _c in ('', 'u', 'use'):
                         use_tags = saved_tags
                     elif _c in ('r', 're', '重新'):
                         use_tags = await learner.interactive_tag_selection(page)
-                
-                if not use_tags and not saved_tags:
-                    console.print("[blue]是否进行标签筛选？(y/n，默认n)[/blue]", end="")
-                    _c = input().strip().lower()
+                elif not tags:
+                    _c = await async_input("是否筛选标签？(y/n，默认n)", default="n", timeout=5)
                     if _c in ('y', 'yes'):
                         use_tags = await learner.interactive_tag_selection(page)
-                
+
                 if use_tags:
                     learner.tags_to_learn = use_tags
                     await learner.filter_by_tags(page)
                     await asyncio.sleep(3)
-                    # 保存本次选择
                     try:
                         with open(TAGS_STATE_PATH, "w", encoding="utf-8") as _f:
                             json.dump({"tags": use_tags}, _f, ensure_ascii=False, indent=2)
-                        console.print("标签选择已保存，下次可直接使用", style="green")
                     except:
                         pass
-                else:
-                    # 删除保存的标签（如果用户跳过了）
-                    if os.path.exists(TAGS_STATE_PATH):
-                        try:
-                            os.remove(TAGS_STATE_PATH)
-                        except:
-                            pass
-            
-            # 获取当前页的专题班
+
+            # 加载学习进度
+            progress = learner.load_progress()
+            completed_ids = set(progress.get("completed_ws_ids", []))
+            if completed_ids:
+                console.print(f"已有进度: [green]{len(completed_ids)}[/green] 个专题班已完成")
+                _rp = await async_input("继续(回车) / 重新开始(r)？", default="", timeout=5)
+                if _rp in ('r', 're', '重新'):
+                    completed_ids = set()
+                    learner.save_progress(set())
+
+            # ===== 按需翻页 + 逐页采集 + 学习 =====
             page_num = 1
-            current_workshops = await learner.get_workshops(page)
-            
-            while current_workshops:
-                console.print(f"第 {page_num} 页，共 {len(current_workshops)} 个专题班", style="green")
-                await learner.display_workshops(current_workshops)
-                
-                if page_num == 0:  # 只在第一页问
-                    console.print("从第一个专题班开始按顺序学习，按回车键开始（或输入编号 n 跳过前面 n 个）: ", style="yellow", end="")
-                    skip_str = input().strip()
-                    skip = 0
-                    if skip_str.isdigit():
-                        skip = int(skip_str)
-                    elif skip_str:
-                        skip = int(skip_str)
-                else:
-                    skip = 0
-                
-                for idx in range(skip, len(current_workshops)):
-                    ws = current_workshops[idx]
-                    console.print(f"\n[{idx+1}/{len(current_workshops)}] 开始学习: {ws['title'][:50]}", style="bold blue")
-                    
-                    try:
-                        success, wpage = await learner.enroll_workshop(page, ws['title'])
-                        if success:
-                            await learner.find_and_learn_courses(wpage, 0)
-                        else:
-                            console.print(f"进入专题班失败，跳过", style="red")
-                    except Exception as e:
-                        console.print(f"学习过程出错: {e}", style="red")
-                        import traceback
-                        traceback.print_exc()
-                    
-                    # 返回专题班列表页，准备下一个
-                    try:
-                        await page.goto("https://u.ccb.com/workshop/#/index",
-                                        wait_until="networkidle", timeout=15000)
-                        await page.wait_for_timeout(3000)
-                    except:
-                        pass
-                    
-                    # 每个专题班之间暂停，让用户确认
-                    if idx < len(current_workshops) - 1:
-                        c = await async_input("\n是否继续学习下一个专题班？(y/n，默认y)", default="y", timeout=5)
-                        if c in ('n', 'no'):
-                            console.print("跳过剩余专题班", style="yellow")
-                            break
-                
-                # 当前页学完，看是否有下一页
-                console.print(f"\n当前页({page_num})已全部学完", style="green")
-                has_next = await learner.go_to_next_page(page)
-                if not has_next:
-                    console.print("已到最后一页，学习完成!", style="bold green")
-                    break
-                
-                page_num += 1
-                console.print(f"\n进入第 {page_num} 页", style="blue")
-                await page.wait_for_timeout(3000)
+            all_tasks = []
+            all_ws_locks = {}
+            has_more_pages = True
+
+            while has_more_pages:
+                # 获取当前页的专题班
                 current_workshops = await learner.get_workshops(page)
-            
-            if not current_workshops and page_num == 1:
-                console.print("未找到专题班", style="yellow")
-            
+                if not current_workshops:
+                    console.print(f"第 {page_num} 页无专题班", style="yellow")
+                    break
+
+                console.print(f"\n{'='*50}", style="bold blue")
+                console.print(f"第 {page_num} 页: {len(current_workshops)} 个专题班", style="bold blue")
+                console.print(f"{'='*50}", style="bold blue")
+                await learner.display_workshops(current_workshops)
+
+                # 采集当前页的课程
+                tasks, ws_locks = await learner._collect_workshops_courses(
+                    page, current_workshops, completed_ids)
+                # 采集后保存进度（新标记的已完成专题班）
+                learner.save_progress(completed_ids, page_num, 0)
+                if tasks:
+                    all_tasks.extend(tasks)
+                    all_ws_locks.update(ws_locks)
+                    console.print(f"累计 {len(all_tasks)} 门待学课程", style="green")
+
+                # 如果已有待学课程，先学完再决定是否翻页
+                if all_tasks:
+                    console.print(f"\n{'='*50}", style="bold blue")
+                    console.print(f"开始学习（{len(all_tasks)} 门课程, {learner.workers} 个线程）", style="bold blue")
+                    console.print(f"{'='*50}", style="bold blue")
+                    await learner.parallel_learn_courses(all_tasks, all_ws_locks)
+                    all_tasks = []
+                    all_ws_locks = {}
+                    # 学完后重新加载已完成列表
+                    progress = learner.load_progress()
+                    completed_ids = set(progress.get("completed_ws_ids", []))
+
+                # 检查是否还需要继续（目标学时达标则停止）
+                if learner.study_goal > 0:
+                    _h = await learner._get_study_hours(page)
+                    _cur = _h.get(learner.goal_type, 0)
+                    _tn = "集中培训" if learner.goal_type == "central" else "网络自学"
+                    console.print(f"当前{_tn}: {_cur:.1f}/{learner.study_goal} 学时", style="blue")
+                    if _cur >= learner.study_goal:
+                        console.print(f"已达到学习目标! 停止翻页", style="bold green")
+                        break
+
+                # 翻到下一页
+                has_more_pages = await learner.go_to_next_page(page)
+                if has_more_pages:
+                    page_num += 1
+                    await page.wait_for_timeout(3000)
+
+            if not all_tasks and page_num == 1:
+                console.print("没有需要学习的课程", style="yellow")
+
             console.print("\n✓ 学习流程完成! 浏览器将保持打开", style="bold green")
-            console.print("按回车键关闭浏览器...", style="yellow")
-            input("")
+            await async_input("按回车键关闭浏览器", default="", timeout=600, block=True)
             
         finally:
             await learner.close()
@@ -1961,8 +2675,7 @@ def hours():
             await learner.init()
             await learner.login()
             hours = await learner.get_study_hours()
-            console.print("\n按回车键关闭浏览器...", style="yellow")
-            input("")
+            await async_input("\n按回车键关闭浏览器", default="", timeout=600, block=True)
         finally:
             await learner.close()
     
@@ -1973,7 +2686,7 @@ def hours():
 def clear():
     """清除所有保存的会话、凭证和标签筛选"""
     removed = []
-    for _p in [STORAGE_STATE_PATH, USER_CREDENTIALS_PATH, TAGS_STATE_PATH, CONFIG_PATH]:
+    for _p in [STORAGE_STATE_PATH, USER_CREDENTIALS_PATH, TAGS_STATE_PATH, CONFIG_PATH, PROGRESS_PATH]:
         if os.path.exists(_p):
             try:
                 os.remove(_p)
