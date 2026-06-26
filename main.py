@@ -1902,33 +1902,46 @@ class CCBULearner:
                 except:
                     pass
                 try:
-                    # 导航到专题班详情页
-                    ws_url_my = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
-                    ws_url_detail = f"https://u.ccb.com/workshop/#/detail?id={ws_id}"
+                    # 方式：打开专题班列表页 → 找到并点击专题班链接
+                    list_url = "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise"
+                    try:
+                        await cp.goto(list_url, wait_until="domcontentloaded", timeout=20000)
+                        await cp.wait_for_timeout(5000)
+                    except:
+                        pass
+
+                    # 查找包含ws_id的链接并点击
+                    clicked = False
+                    try:
+                        link = cp.locator(f"a[href*='{ws_id}']").first
+                        if await link.count() > 0:
+                            await link.click()
+                            clicked = True
+                            await cp.wait_for_timeout(6000)
+                        else:
+                            # 尝试通过标题查找
+                            link = cp.locator(f"text={ws_title[:20]}").first
+                            if await link.count() > 0 and await link.is_visible():
+                                await link.click()
+                                clicked = True
+                                await cp.wait_for_timeout(6000)
+                    except Exception as e:
+                        debug(f"  点击异常: {e}")
+
+                    if not clicked:
+                        # 兜底：直接goto
+                        try:
+                            await cp.goto(f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}",
+                                          wait_until="domcontentloaded", timeout=20000)
+                            await cp.wait_for_timeout(6000)
+                        except:
+                            pass
 
                     body_text = ""
-                    for nav_url in [ws_url_my, ws_url_detail]:
-                        try:
-                            await cp.goto(nav_url, wait_until="domcontentloaded", timeout=20000)
-                            await cp.wait_for_timeout(6000)
-                        except Exception as e:
-                            debug(f"  导航异常: {e}")
-
-                        try:
-                            body_text = await cp.locator("body").inner_text(timeout=3000)
-                        except:
-                            pass
-                        if "创建日期" in body_text or "报名" in body_text:
-                            break
-
-                        try:
-                            await cp.evaluate("location.reload()")
-                            await cp.wait_for_timeout(8000)
-                            body_text = await cp.locator("body").inner_text(timeout=3000)
-                            if "创建日期" in body_text or "报名" in body_text:
-                                break
-                        except:
-                            pass
+                    try:
+                        body_text = await cp.locator("body").inner_text(timeout=3000)
+                    except:
+                        pass
 
                     # 检查是否报名截止
                     if "报名截止" in body_text:
