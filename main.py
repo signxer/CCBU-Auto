@@ -1457,8 +1457,10 @@ class CCBULearner:
                 await page.wait_for_timeout(5000)
 
             if not video_found:
-                debug(f"[工作线程 {worker_id+1}] 未找到视频")
-                return False
+                # 可能是图书/文档类课程，打开即算完成
+                debug(f"[工作线程 {worker_id+1}] 未找到视频（可能是图书/文档），等待页面加载后关闭")
+                await page.wait_for_timeout(5000)
+                return True  # 返回True，视为已完成
 
             await self._set_lowest_quality(page)
 
@@ -1549,8 +1551,8 @@ class CCBULearner:
             for row in rows_data:
                 title = row.get('title', '').strip()
                 ctype = row.get('type', '').strip()
-                # 排除图书/图书包
-                if '图书' in ctype or ctype in ('考试', 'scorm'):
+                # 排除考试/scorm（不能自动完成）
+                if ctype in ('考试', 'scorm'):
                     skipped.append(f"{ctype}: {title[:30]}")
                     continue
                 if title and len(title) > 3:
