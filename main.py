@@ -1543,6 +1543,17 @@ class CCBULearner:
             if courses:
                 debug(f"前3门课程 action: {[(c['title'][:30], c['action']) for c in courses[:3]]}")
 
+            # 检查是否有NaN（页面未完全加载）
+            has_nan = False
+            for c in courses:
+                for v in c.values():
+                    if isinstance(v, str) and 'NaN' in v:
+                        has_nan = True
+                        break
+            if has_nan:
+                debug("  课程数据包含NaN，页面未完全加载")
+                courses = []
+
             console.print(f"课程列表: {len(courses)} 门", style="green")
         except Exception as e:
             console.print(f"获取课程列表失败: {e}", style="yellow")
@@ -1899,7 +1910,8 @@ class CCBULearner:
 
                 # 检查是否报名截止
                 if "报名截止" in body_text:
-                    debug(f"  报名截止: {ws_title}")
+                    console.print(f"  ⊘ 报名截止，跳过: {ws_title[:30]}", style="yellow")
+                    return None
 
                 # 点击"课程"标签页（部分专题班默认显示讨论区，需切换到课程列表）
                 for tab_text in ["课程", "课程列表", "课程目录"]:
