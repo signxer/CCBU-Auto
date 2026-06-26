@@ -717,11 +717,18 @@ class DashboardScreen(QWidget):
         InfoBar.success("完成", f"学习流程结束，成功 {success} 门", parent=self, position=InfoBarPosition.TOP_RIGHT)
 
     def _on_tag_request(self, tags_by_category):
-        dlg = Dialog("选择标签", "选择要学习的标签（不选则全部学习）", self)
-        dlg.cancelButton.setText("跳过")
-        dlg.yesButton.setText("确认选择")
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("选择标签")
         dlg.setMinimumWidth(450)
         dlg.setMinimumHeight(500)
+
+        vlayout = QVBoxLayout(dlg)
+        vlayout.setSpacing(12)
+
+        label = SubtitleLabel("选择要学习的标签（不选则全部学习）")
+        vlayout.addWidget(label)
 
         list_widget = QListWidget()
         list_widget.setSelectionMode(QListWidget.MultiSelection)
@@ -730,11 +737,21 @@ class DashboardScreen(QWidget):
             for tag in tags:
                 all_tags.append(tag)
                 list_widget.addItem(f"{category} → {tag}")
+        vlayout.addWidget(list_widget)
 
-        dlg.textLayout.addWidget(list_widget)
-        dlg.widgetLayout.insertLayout(1, dlg.textLayout)
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+        btn_skip = PushButton("跳过")
+        btn_skip.clicked.connect(lambda: dlg.done(0))
+        btn_layout.addWidget(btn_skip)
+        btn_ok = PrimaryPushButton("确认选择")
+        btn_ok.clicked.connect(lambda: dlg.done(1))
+        btn_layout.addWidget(btn_ok)
+        vlayout.addLayout(btn_layout)
 
-        if dlg.exec():
+        result = dlg.exec()
+
+        if result:
             selected = []
             for i in range(list_widget.count()):
                 if list_widget.item(i).isSelected():
@@ -808,6 +825,9 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle("Windows")
     setTheme(Theme.AUTO)
+    # Fix font for macOS
+    from PyQt5.QtGui import QFont
+    app.setFont(QFont("PingFang SC", 13))
 
     window = MainWindow()
     window.show()
