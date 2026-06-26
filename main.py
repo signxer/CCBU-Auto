@@ -1632,7 +1632,7 @@ class CCBULearner:
         
         # 统计
         total = len(courses)
-        to_learn = sum(1 for c in courses if self._is_learnable(c.get('action', '')))
+        to_learn = sum(1 for c in courses if self._is_learnable(c.get('action', ''), c.get('hours', '')))
         done = total - to_learn
         console.print(f"总计 {total} 门，可学习 {to_learn} 门，已完成 {done} 门",
                      style="bold blue")
@@ -1830,10 +1830,17 @@ class CCBULearner:
         console.print("课程模式学习完成", style="bold green")
 
     @staticmethod
-    def _is_learnable(action: str) -> bool:
+    def _is_learnable(action: str, hours: str = "") -> bool:
         """判断课程是否可以学习（未完成或进行中）"""
         if not action:
             return False
+        # 跳过0学时课程
+        try:
+            h = float(hours) if hours else -1
+            if h == 0:
+                return False
+        except:
+            pass
         # 100%完成 → 不需要学
         if action in ('立即回看', '学习完成', '已完成'):
             return False
@@ -2030,7 +2037,7 @@ class CCBULearner:
 
                     if courses:
                         to_learn = [(i, c) for i, c in enumerate(courses)
-                                    if self._is_learnable(c.get('action', ''))]
+                                    if self._is_learnable(c.get('action', ''), c.get('hours', ''))]
                         action_vals = set(c.get('action', '') for c in courses)
                         debug(f"  课程action值: {action_vals}, 待学: {len(to_learn)}")
                         if not to_learn:
@@ -2643,7 +2650,7 @@ class CCBULearner:
                 _log(f"  ✗ 未获取到课程", "yellow")
                 continue
 
-            to_learn = [(i, c) for i, c in enumerate(courses) if self._is_learnable(c.get('action', ''))]
+            to_learn = [(i, c) for i, c in enumerate(courses) if self._is_learnable(c.get('action', ''), c.get('hours', ''))]
             ws_title = body[:50].split("\n")[0].strip() if body else ws_id[:16]
 
             if not to_learn:
