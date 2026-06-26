@@ -1256,7 +1256,7 @@ class CCBULearner:
             
             # 多次尝试获取课程列表（表格可能是异步加载的）
             courses = []
-            for attempt in range(5):
+            for attempt in range(10):
                 if attempt > 0:
                     console.print(f"第 {attempt+1} 次尝试获取课程列表...", style="yellow")
                     await page.reload(wait_until="networkidle")
@@ -1490,8 +1490,8 @@ class CCBULearner:
                 if row_count > 0 or tbody_has_children > 0:
                     break
                 debug(f"  等待课程数据加载({_wait+1}/6)...")
-                await page.wait_for_timeout(3000)
-            await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(2000)
 
             # 检查页面是否加载了课程表格
             row_count = await page.locator("tr.text-center").count()
@@ -2004,17 +2004,17 @@ class CCBULearner:
 
                 # 获取课程列表（重试5次）
                 courses = []
-                for attempt in range(5):
+                for attempt in range(10):
                     if attempt > 0:
                         console.print(f"  第 {attempt+1} 次获取课程...", style="yellow")
                         debug(f"  [{ws_title[:20]}] 第{attempt+1}次重试, URL: {cp.url}")
                         try:
-                            await cp.goto(ws_url, wait_until="domcontentloaded", timeout=15000)
-                            await cp.wait_for_timeout(5000)
+                            await cp.goto(ws_url, wait_until="domcontentloaded", timeout=20000)
+                            await cp.wait_for_timeout(8000)
                         except:
                             try:
-                                await cp.reload(wait_until="domcontentloaded", timeout=15000)
-                                await cp.wait_for_timeout(5000)
+                                await cp.reload(wait_until="domcontentloaded", timeout=20000)
+                                await cp.wait_for_timeout(8000)
                             except:
                                 pass
                     courses = await self.get_courses_from_workshop(cp)

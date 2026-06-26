@@ -46,6 +46,7 @@ class AsyncThread(QThread):
     done_signal = Signal(int, int)
     tag_request_signal = Signal(dict)
     tag_confirm_signal = Signal(list, dict)  # (saved_tags, tags_by_category)
+    page_confirm_signal = Signal(int)  # last_page
 
     def __init__(self, coro_func, parent=None):
         super().__init__(parent)
@@ -744,6 +745,7 @@ class DashboardScreen(QWidget):
         self._worker.done_signal.connect(self._on_done)
         self._worker.tag_request_signal.connect(self._on_tag_request)
         self._worker.tag_confirm_signal.connect(self._on_tag_confirm)
+        self._worker.page_confirm_signal.connect(self._on_page_confirm)
         self._worker.start()
 
     def _init_table(self, workers):
@@ -850,16 +852,24 @@ class DashboardScreen(QWidget):
             completed_ids = set(progress.get("completed_ws_ids", []))
             last_page = progress.get("last_page", 1)
 
-            # 跳转到上次的页码
+            # 询问是否从上次页码继续
             page_num = 1
             if last_page > 1:
-                log(f"跳转到第 {last_page} 页（上次进度）", "blue")
-                for _ in range(last_page - 1):
-                    moved = await learner.go_to_next_page(page)
-                    if not moved:
-                        break
-                    page_num += 1
-                    await page.wait_for_timeout(1000)
+                self._page_event = threading.Event()
+                self._page_resume = True
+                thread.page_confirm_signal.emit(last_page)
+                await asyncio.get_event_loop().run_in_executor(None, self._page_event.wait)
+
+                if self._page_resume:
+                    log(f"跳转到第 {last_page} 页", "blue")
+                    for _ in range(last_page - 1):
+                        moved = await learner.go_to_next_page(page)
+                        if not moved:
+                            break
+                        page_num += 1
+                        await page.wait_for_timeout(1000)
+                else:
+                    log("从第 1 页开始", "blue")
 
             no_more_pages = False
             tasks = []
@@ -1166,6 +1176,68 @@ class DashboardScreen(QWidget):
 
         self._on_log(f"标签: {', '.join(win.cfg_tags)}" if win.cfg_tags else "跳过标签筛选", "green" if win.cfg_tags else "yellow")
         self._tag_event.set()
+
+    def _on_page_confirm(self, last_page):
+        """询问是否从上次保存的页码继续"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout
+        from PyQt5.QtCore import QTimer
+
+        TIMEOUT = 10
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("继续学习")
+        dlg.setMinimumWidth(380)
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
+
+        title = SubtitleLabel("继续学习")
+        layout.addWidget(title)
+
+        info = BodyLabel(f"上次学习到第 {last_page} 页，是否继续？")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        btn_restart = PushButton("  从第1页开始")
+        btn_restart.setIcon(FIF.CLOSE)
+        btn_restart.clicked.connect(lambda: dlg.done(0))
+        btn_layout.addWidget(btn_restart)
+
+        btn_continue = PrimaryPushButton(f"  继续第{last_page}页 ({TIMEOUT}s)")
+        btn_continue.setIcon(FIF.PLAY)
+        btn_continue.clicked.connect(lambda: dlg.done(1))
+        btn_layout.addWidget(btn_continue)
+
+        layout.addLayout(btn_layout)
+
+        countdown = [TIMEOUT]
+        timer = QTimer(dlg)
+        timer.setInterval(1000)
+
+        def tick():
+            countdown[0] -= 1
+            if countdown[0] <= 0:
+                timer.stop()
+                dlg.done(1)
+            else:
+                btn_continue.setText(f"  继续第{last_page}页 ({countdown[0]}s)")
+
+        timer.timeout.connect(tick)
+        timer.start()
+
+        btn_restart.clicked.connect(timer.stop)
+        btn_continue.clicked.connect(timer.stop)
+
+        result = dlg.exec()
+
+        self._page_resume = (result == 1)
+        self._page_event.set()
 
 
 # ─── Main Window ───────────────────────────────────────────────────
