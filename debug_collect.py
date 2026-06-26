@@ -18,7 +18,7 @@ TEST_IDS = [
 async def main():
     log_file = open("debug_collect.log", "w", encoding="utf-8")
     def log(msg):
-        log(msg)
+        print(msg)
         log_file.write(msg + "\n")
         log_file.flush()
 
