@@ -412,12 +412,11 @@ class DashboardScreen(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(10)
 
         # Header
         header = QHBoxLayout()
-        header.setSpacing(12)
         title = StrongBodyLabel("学习仪表盘")
         title.setFont(QFont("", 16, QFont.Bold))
         header.addWidget(title)
@@ -426,42 +425,47 @@ class DashboardScreen(QWidget):
         header.addWidget(self.lbl_status)
         layout.addLayout(header)
 
-        # Top info cards
-        info_layout = QHBoxLayout()
-        info_layout.setSpacing(12)
+        # Main area: left info | center table | right log
+        main_area = QHBoxLayout()
+        main_area.setSpacing(10)
 
-        # Hours card
+        # ── Left panel: hours + goal ──
+        left = QVBoxLayout()
+        left.setSpacing(10)
+
         hours_card = SimpleCardWidget(self)
         hours_card.setBorderRadius(8)
+        hours_card.setFixedWidth(200)
         hl = QVBoxLayout(hours_card)
-        hl.setContentsMargins(16, 12, 16, 12)
-        hl.setSpacing(8)
+        hl.setContentsMargins(14, 10, 14, 10)
+        hl.setSpacing(6)
         hl.addWidget(SubtitleLabel("培训学时"))
-        self.lbl_central = BodyLabel("集中培训: -- 学时")
-        self.lbl_online = BodyLabel("网络自学: -- 学时")
-        self.lbl_updated = CaptionLabel("更新时间: --")
+        self.lbl_central = BodyLabel("集中培训: --")
+        self.lbl_online = BodyLabel("网络自学: --")
+        self.lbl_updated = CaptionLabel("更新: --")
         hl.addWidget(self.lbl_central)
         hl.addWidget(self.lbl_online)
         hl.addWidget(self.lbl_updated)
-        info_layout.addWidget(hours_card)
+        left.addWidget(hours_card)
 
-        # Goal card
         goal_card = SimpleCardWidget(self)
         goal_card.setBorderRadius(8)
+        goal_card.setFixedWidth(200)
         gl = QVBoxLayout(goal_card)
-        gl.setContentsMargins(16, 12, 16, 12)
-        gl.setSpacing(8)
+        gl.setContentsMargins(14, 10, 14, 10)
+        gl.setSpacing(6)
         gl.addWidget(SubtitleLabel("学习目标"))
         self.lbl_goal_info = BodyLabel("--")
         self.progress_goal = ProgressBar()
         self.progress_goal.setValue(0)
         gl.addWidget(self.lbl_goal_info)
         gl.addWidget(self.progress_goal)
-        info_layout.addWidget(goal_card)
+        left.addWidget(goal_card)
 
-        layout.addLayout(info_layout)
+        left.addStretch()
+        main_area.addLayout(left)
 
-        # Worker table
+        # ── Center: worker table ──
         table_card = SimpleCardWidget(self)
         table_card.setBorderRadius(8)
         tl = QVBoxLayout(table_card)
@@ -469,7 +473,7 @@ class DashboardScreen(QWidget):
         tl.setSpacing(0)
 
         table_header = QHBoxLayout()
-        table_header.setContentsMargins(16, 12, 16, 8)
+        table_header.setContentsMargins(14, 10, 14, 6)
         table_header.addWidget(SubtitleLabel("学习进度"))
         table_header.addStretch()
         self.lbl_progress_summary = CaptionLabel("")
@@ -481,26 +485,27 @@ class DashboardScreen(QWidget):
         self.table.setHorizontalHeaderLabels(["线程", "课程", "进度", "预计", "状态"])
         self.table.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Fixed)
-        self.table.setColumnWidth(0, 60)
-        self.table.setColumnWidth(2, 70)
-        self.table.setColumnWidth(3, 70)
-        self.table.setColumnWidth(4, 100)
+        self.table.setColumnWidth(0, 50)
+        self.table.setColumnWidth(2, 60)
+        self.table.setColumnWidth(3, 60)
+        self.table.setColumnWidth(4, 90)
         self.table.setEditTriggers(TableWidget.NoEditTriggers)
         self.table.setSelectionMode(TableWidget.NoSelection)
         self.table.setBorderRadius(8)
         tl.addWidget(self.table)
 
-        layout.addWidget(table_card, 1)
+        main_area.addWidget(table_card, 1)
 
-        # Log
+        # ── Right panel: log ──
         log_card = SimpleCardWidget(self)
         log_card.setBorderRadius(8)
+        log_card.setFixedWidth(320)
         ll = QVBoxLayout(log_card)
         ll.setContentsMargins(0, 0, 0, 0)
         ll.setSpacing(0)
 
         log_header = QHBoxLayout()
-        log_header.setContentsMargins(16, 10, 16, 6)
+        log_header.setContentsMargins(14, 10, 14, 6)
         log_header.addWidget(SubtitleLabel("日志"))
         log_header.addStretch()
         ll.addLayout(log_header)
@@ -508,10 +513,11 @@ class DashboardScreen(QWidget):
         self.log_view = PlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(500)
-        self.log_view.setMaximumHeight(180)
         ll.addWidget(self.log_view)
 
-        layout.addWidget(log_card)
+        main_area.addWidget(log_card)
+
+        layout.addLayout(main_area, 1)
 
     def start_learning(self):
         win = self.window()
