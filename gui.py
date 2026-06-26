@@ -815,9 +815,11 @@ class DashboardScreen(QWidget):
             page = learner.pages[0]
             list_url = "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise"
 
-            # 加载专题班列表页（重试最多5次）
+            # 加载专题班列表页（刷新直到标签树出来）
             tags_by_category = {}
-            for load_attempt in range(5):
+            load_attempt = 0
+            while not tags_by_category:
+                load_attempt += 1
                 try:
                     await page.goto(list_url, wait_until="domcontentloaded", timeout=20000)
                     await page.wait_for_timeout(6000)
@@ -834,9 +836,8 @@ class DashboardScreen(QWidget):
                     log(f"发现 {tag_count} 个标签", "blue")
                     break
 
-                if load_attempt < 4:
-                    log(f"标签未加载，重试({load_attempt+1}/5)...", "yellow")
-                    await page.wait_for_timeout(3000)
+                log(f"标签未加载，重试({load_attempt})...", "yellow")
+                await page.wait_for_timeout(3000)
 
             if cfg_tags:
                 # 有已保存标签，询问用户
