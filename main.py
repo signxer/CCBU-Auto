@@ -2342,13 +2342,29 @@ class CCBULearner:
                     async with ws_locks.get(ws_id, asyncio.Lock()):
                         rows = page.locator("tr.text-center")
                         row_count = await rows.count()
-                        if cidx >= row_count:
-                            update_status(w_id, status="索引超限")
+
+                        # 按标题查找课程行（不依赖索引，避免索引超限）
+                        row = None
+                        course_title = course.get('title', '').strip()[:30]
+                        if course_title:
+                            for i in range(row_count):
+                                try:
+                                    r = rows.nth(i)
+                                    text = await r.inner_text(timeout=2000)
+                                    if course_title in text:
+                                        row = r
+                                        break
+                                except:
+                                    pass
+                        # 兜底：用索引
+                        if row is None and cidx < row_count:
+                            row = rows.nth(cidx)
+                        if row is None:
+                            update_status(w_id, status="未找到课程")
                             async with lock_stat:
                                 failed[0] += 1
                             continue
 
-                        row = rows.nth(cidx)
                         btn = row.locator("span.edit-block").first
                         if await btn.count() == 0:
                             update_status(w_id, status="无按钮")
