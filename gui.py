@@ -45,6 +45,7 @@ class AsyncThread(QThread):
     hours_signal = Signal(dict)
     done_signal = Signal(int, int)
     tag_request_signal = Signal(dict)
+    tag_confirm_signal = Signal(list, dict)  # (saved_tags, tags_by_category)
 
     def __init__(self, coro_func, parent=None):
         super().__init__(parent)
@@ -692,6 +693,7 @@ class DashboardScreen(QWidget):
         self._worker.hours_signal.connect(self._on_hours)
         self._worker.done_signal.connect(self._on_done)
         self._worker.tag_request_signal.connect(self._on_tag_request)
+        self._worker.tag_confirm_signal.connect(self._on_tag_confirm)
         self._worker.start()
 
     def _init_table(self, workers):
@@ -757,8 +759,6 @@ class DashboardScreen(QWidget):
             # 自动模式
             learner.study_goal = cfg_goal_hours
             learner.goal_type = cfg_goal_type
-            if cfg_tags:
-                learner.tags_to_learn = cfg_tags
 
             page = learner.pages[0]
             await page.goto(
@@ -767,20 +767,29 @@ class DashboardScreen(QWidget):
             )
             await page.wait_for_timeout(5000)
 
-            if not cfg_tags:
-                try:
-                    tags_by_category = await learner.get_available_tags(page)
-                    if tags_by_category:
-                        tag_count = sum(len(v) for v in tags_by_category.values())
-                        log(f"发现 {tag_count} 个标签，等待选择...", "blue")
+            # 标签筛选：总是询问用户
+            try:
+                tags_by_category = await learner.get_available_tags(page)
+                if tags_by_category:
+                    tag_count = sum(len(v) for v in tags_by_category.values())
+                    log(f"发现 {tag_count} 个标签", "blue")
+
+                    if cfg_tags:
+                        # 有已保存标签，询问用户
+                        self._tag_event.clear()
+                        thread.tag_confirm_signal.emit(cfg_tags, tags_by_category)
+                        await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
+                        cfg_tags = list(getattr(win, "cfg_tags", []))
+                    else:
+                        # 无已保存标签，直接弹选择框
                         self._tag_event.clear()
                         thread.tag_request_signal.emit(tags_by_category)
                         await asyncio.get_event_loop().run_in_executor(None, self._tag_event.wait)
-                        # 重新读取用户选择的标签
                         cfg_tags = list(getattr(win, "cfg_tags", []))
-                        log(f"已选择标签: {cfg_tags}" if cfg_tags else "未选择标签", "green" if cfg_tags else "yellow")
-                except Exception as e:
-                    log(f"标签加载失败: {e}", "yellow")
+
+                    log(f"标签: {', '.join(cfg_tags)}" if cfg_tags else "未选择标签，学习全部", "green" if cfg_tags else "yellow")
+            except Exception as e:
+                log(f"标签加载失败: {e}", "yellow")
 
             if cfg_tags:
                 learner.tags_to_learn = cfg_tags
@@ -1008,6 +1017,67 @@ class DashboardScreen(QWidget):
             self._on_log(f"已选择 {len(selected)} 个标签", "green")
         else:
             self._on_log("未选择标签，将学习全部", "yellow")
+        self._tag_event.set()
+
+    def _on_tag_confirm(self, saved_tags, tags_by_category):
+        """有已保存标签时，询问用户：使用已保存 / 重新选择 / 跳过"""
+        from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout
+
+        dlg = QDialog(self)
+        dlg.setWindowTitle("标签筛选")
+        dlg.setMinimumWidth(400)
+
+        layout = QVBoxLayout(dlg)
+        layout.setSpacing(16)
+        layout.setContentsMargins(24, 24, 24, 24)
+
+        title = SubtitleLabel("标签筛选")
+        layout.addWidget(title)
+
+        tags_text = ", ".join(saved_tags[:5])
+        if len(saved_tags) > 5:
+            tags_text += f" 等{len(saved_tags)}个"
+        info = BodyLabel(f"已保存标签: {tags_text}")
+        info.setWordWrap(True)
+        layout.addWidget(info)
+
+        layout.addStretch()
+
+        btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(12)
+
+        btn_skip = PushButton("  跳过（学习全部）")
+        btn_skip.setIcon(FIF.CLOSE)
+        btn_skip.clicked.connect(lambda: dlg.done(0))
+        btn_layout.addWidget(btn_skip)
+
+        btn_resel = PushButton("  重新选择")
+        btn_resel.setIcon(FIF.EDIT)
+        btn_resel.clicked.connect(lambda: dlg.done(1))
+        btn_layout.addWidget(btn_resel)
+
+        btn_use = PrimaryPushButton("  使用已保存")
+        btn_use.setIcon(FIF.ACCEPT_MEDIUM)
+        btn_use.clicked.connect(lambda: dlg.done(2))
+        btn_layout.addWidget(btn_use)
+
+        layout.addLayout(btn_layout)
+
+        result = dlg.exec()
+
+        win = self.window()
+        if result == 2:
+            # 使用已保存标签
+            win.cfg_tags = list(saved_tags)
+        elif result == 1:
+            # 重新选择：弹出完整标签选择框
+            self._on_tag_request(tags_by_category)
+            return  # _on_tag_request 会设置 _tag_event
+        else:
+            # 跳过
+            win.cfg_tags = []
+
+        self._on_log(f"标签: {', '.join(win.cfg_tags)}" if win.cfg_tags else "跳过标签筛选", "green" if win.cfg_tags else "yellow")
         self._tag_event.set()
 
 
