@@ -726,11 +726,22 @@ class DashboardScreen(QWidget):
                 learner.tags_to_learn = cfg_tags
 
             page = learner.pages[0]
+
+            # 导航到专题班页面后加载标签
             await page.goto(
                 "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
                 wait_until="networkidle", timeout=30000,
             )
             await page.wait_for_timeout(5000)
+
+            # 如果没有CLI标签，尝试从浏览器加载并让用户选择
+            if not cfg_tags:
+                try:
+                    tags_by_category = await learner.get_available_tags(page)
+                    if tags_by_category:
+                        log(f"发现 {sum(len(v) for v in tags_by_category.values())} 个标签", "blue")
+                except:
+                    pass
 
             if cfg_tags:
                 await learner.filter_by_tags(page)
@@ -914,14 +925,12 @@ class MainWindow(QMainWindow):
         self.screen_config = ConfigScreen()
         self.screen_login = LoginScreen()
         self.screen_goal = GoalScreen()
-        self.screen_tag = TagScreen()
         self.screen_dashboard = DashboardScreen()
 
         self.stack.addWidget(self.screen_config)   # 0
         self.stack.addWidget(self.screen_login)     # 1
         self.stack.addWidget(self.screen_goal)      # 2
-        self.stack.addWidget(self.screen_tag)       # 3
-        self.stack.addWidget(self.screen_dashboard) # 4
+        self.stack.addWidget(self.screen_dashboard) # 3
 
         self._screen_index = 0
 
@@ -929,7 +938,7 @@ class MainWindow(QMainWindow):
         self._screen_index += 1
         if self._screen_index < self.stack.count():
             self.stack.setCurrentIndex(self._screen_index)
-            if self._screen_index == 4:
+            if self._screen_index == 3:
                 self.screen_dashboard.start_learning()
 
 
