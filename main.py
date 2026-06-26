@@ -1905,12 +1905,9 @@ class CCBULearner:
                 body_text = ""
                 for nav_url in [ws_url_my, ws_url_detail]:
                     try:
-                        # 先回列表页重置SPA
-                        await cp.goto(list_url, wait_until="domcontentloaded", timeout=15000)
-                        await cp.wait_for_timeout(2000)
-                        # 用JS强制跳转（比goto更可靠地触发SPA路由）
-                        await cp.evaluate(f"window.location.hash = '{nav_url.split('#')[1]}';")
-                        await cp.wait_for_timeout(5000)
+                        # goto直接导航
+                        await cp.goto(nav_url, wait_until="domcontentloaded", timeout=20000)
+                        await cp.wait_for_timeout(6000)
                     except Exception as e:
                         debug(f"  导航异常: {e}")
 
@@ -1921,10 +1918,11 @@ class CCBULearner:
                         pass
                     if "创建日期" in body_text or "报名" in body_text:
                         break
-                    # 没加载出来，用goto再试一次
+
+                    # 没加载出来，用JS reload强制刷新
                     try:
-                        await cp.goto(nav_url, wait_until="domcontentloaded", timeout=15000)
-                        await cp.wait_for_timeout(5000)
+                        await cp.evaluate("location.reload()")
+                        await cp.wait_for_timeout(8000)
                         body_text = await cp.locator("body").inner_text(timeout=3000)
                         if "创建日期" in body_text or "报名" in body_text:
                             break

@@ -914,6 +914,14 @@ class DashboardScreen(QWidget):
                                     return 0
                             except:
                                 pass
+                        # 先回到专题班列表页（采集后页面可能在其他URL）
+                        try:
+                            await page.goto(
+                                "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
+                                wait_until="domcontentloaded", timeout=15000)
+                            await page.wait_for_timeout(3000)
+                        except:
+                            pass
                         moved = await learner.go_to_next_page(page)
                         if not moved:
                             return 0
