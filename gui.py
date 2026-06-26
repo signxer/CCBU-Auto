@@ -240,15 +240,14 @@ class ConfigScreen(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(200, 40, 200, 40)
+        layout.setSpacing(16)
 
-        # Title
         title = QLabel("运行配置")
         title.setObjectName("title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
-        # Form
         group = QGroupBox("参数设置")
         form = QFormLayout()
         form.setSpacing(12)
@@ -265,16 +264,13 @@ class ConfigScreen(QWidget):
         group.setLayout(form)
         layout.addWidget(group)
 
-        # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         self.btn_start = QPushButton("开始")
         self.btn_start.setObjectName("primary")
         self.btn_start.setFixedWidth(160)
         self.btn_start.clicked.connect(self._on_start)
         btn_layout.addWidget(self.btn_start)
-
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
@@ -283,8 +279,6 @@ class ConfigScreen(QWidget):
     def _on_start(self):
         workers = self.spin_workers.value()
         headless = self.chk_headless.isChecked()
-
-        # Save config
         try:
             cfg = {}
             if os.path.exists(CONFIG_PATH):
@@ -296,7 +290,6 @@ class ConfigScreen(QWidget):
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
         except:
             pass
-
         main_win = self.window()
         main_win.cfg_workers = workers
         main_win.cfg_headless = headless
@@ -321,7 +314,8 @@ class LoginScreen(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(200, 40, 200, 40)
+        layout.setSpacing(16)
 
         title = QLabel("用户登录")
         title.setObjectName("title")
@@ -331,18 +325,14 @@ class LoginScreen(QWidget):
         group = QGroupBox("账号信息")
         form = QFormLayout()
         form.setSpacing(12)
-
         self.input_user = QLineEdit(self._creds.get("username", ""))
         form.addRow("账号:", self.input_user)
-
         self.input_pass = QLineEdit(self._creds.get("password", ""))
         self.input_pass.setEchoMode(QLineEdit.EchoMode.Password)
         form.addRow("密码:", self.input_pass)
-
         group.setLayout(form)
         layout.addWidget(group)
 
-        # Login mode
         mode_group = QGroupBox("登录方式")
         mode_layout = QHBoxLayout()
         self.radio_auto = QRadioButton("自动登录")
@@ -353,27 +343,22 @@ class LoginScreen(QWidget):
         mode_group.setLayout(mode_layout)
         layout.addWidget(mode_group)
 
-        # Status
         self.lbl_status = QLabel("")
         self.lbl_status.setObjectName("subtitle")
         self.lbl_status.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.lbl_status)
 
-        # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
         self.btn_login = QPushButton("登录")
         self.btn_login.setObjectName("primary")
         self.btn_login.setFixedWidth(160)
         self.btn_login.clicked.connect(self._on_login)
         btn_layout.addWidget(self.btn_login)
-
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
 
         layout.addStretch()
-
         self.input_pass.returnPressed.connect(self._on_login)
 
     def _on_login(self):
@@ -420,7 +405,8 @@ class GoalScreen(QWidget):
 
     def _build_ui(self):
         layout = QVBoxLayout(self)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.setContentsMargins(200, 40, 200, 40)
+        layout.setSpacing(16)
 
         title = QLabel("学习目标")
         title.setObjectName("title")
@@ -430,8 +416,6 @@ class GoalScreen(QWidget):
         group = QGroupBox("目标设置")
         form = QFormLayout()
         form.setSpacing(12)
-
-        # Goal type
         type_layout = QHBoxLayout()
         self.radio_central = QRadioButton("集中培训")
         self.radio_online = QRadioButton("网络自学")
@@ -442,14 +426,11 @@ class GoalScreen(QWidget):
         type_layout.addWidget(self.radio_central)
         type_layout.addWidget(self.radio_online)
         form.addRow("目标类型:", type_layout)
-
-        # Hours
         self.spin_hours = QSpinBox()
         self.spin_hours.setRange(0, 9999)
         self.spin_hours.setValue(int(self._saved_goal))
         self.spin_hours.setSpecialValueText("不限制")
         form.addRow("目标学时:", self.spin_hours)
-
         group.setLayout(form)
         layout.addWidget(group)
 
