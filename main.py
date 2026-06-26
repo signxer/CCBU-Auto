@@ -2038,6 +2038,20 @@ class CCBULearner:
             from rich.console import Group
             return Group(hours_table, table)
 
+        # 进度统计
+        total = len(all_tasks)
+        completed_count = [0]
+        failed = [0]
+        lock_stat = asyncio.Lock()
+
+        # 按专题班统计完成情况：{ws_id: {"total": N, "done": N, "title": str}}
+        ws_progress = {}
+        for ws_id, cidx, course, ws_title in all_tasks:
+            if ws_id not in ws_progress:
+                ws_progress[ws_id] = {"total": 0, "done": 0, "title": ws_title}
+            ws_progress[ws_id]["total"] += 1
+        completed_ws_ids = set()
+
         # 构建任务队列（每个任务带重试计数）
         MAX_RETRY = 3
         course_queue = asyncio.Queue()
@@ -2060,20 +2074,6 @@ class CCBULearner:
             course_queue.put_nowait((*t, 0))  # (ws_id, cidx, course, ws_title, retry)
         if dedup_count > 0:
             console.print(f"  去重: 跳过 {dedup_count} 门重复课程", style="yellow")
-
-        # 进度统计
-        total = len(all_tasks)
-        completed_count = [0]
-        failed = [0]
-        lock_stat = asyncio.Lock()
-
-        # 按专题班统计完成情况：{ws_id: {"total": N, "done": N, "title": str}}
-        ws_progress = {}
-        for ws_id, cidx, course, ws_title in all_tasks:
-            if ws_id not in ws_progress:
-                ws_progress[ws_id] = {"total": 0, "done": 0, "title": ws_title}
-            ws_progress[ws_id]["total"] += 1
-        completed_ws_ids = set()
 
         def retry_task(ws_id, cidx, course, ws_title, retry):
             """失败任务放回队列重试"""
