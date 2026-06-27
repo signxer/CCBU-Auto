@@ -576,6 +576,8 @@ class DashboardScreen(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._tag_event = threading.Event()
+        self._learn_start_time = None      # 学习开始时间
+        self._progress_history = []         # [(timestamp, pct), ...]
         self._build_ui()
 
     def _build_ui(self):
@@ -652,6 +654,9 @@ class DashboardScreen(QWidget):
         gl_left.addLayout(gl_title)
         self.lbl_goal_info = BodyLabel("--")
         gl_left.addWidget(self.lbl_goal_info)
+        self.lbl_eta = CaptionLabel("")
+        self.lbl_eta.setStyleSheet("color: #888;")
+        gl_left.addWidget(self.lbl_eta)
         gl_left.addStretch()
         gl.addLayout(gl_left)
         self.progress_ring = ProgressRing()
@@ -766,6 +771,11 @@ class DashboardScreen(QWidget):
             self.lbl_goal_info.setText("不限制")
 
     async def _run_learning(self, thread: AsyncThread):
+        # 重置 ETA 追踪
+        self._learn_start_time = None
+        self._progress_history = []
+        self.lbl_eta.setText("")
+
         win = self.window()
         cfg_workers = getattr(win, "cfg_workers", 1)
         cfg_headless = getattr(win, "cfg_headless", False)
@@ -789,13 +799,18 @@ class DashboardScreen(QWidget):
             log("浏览器初始化完成", "green")
 
             log("正在登录...")
-            await learner.login(
-                page=learner.pages[0],
-                username=cfg_username,
-                password=cfg_password,
-                auto_login=cfg_auto_login,
-                log_callback=log,
-            )
+            try:
+                await learner.login(
+                    page=learner.pages[0],
+                    username=cfg_username,
+                    password=cfg_password,
+                    auto_login=cfg_auto_login,
+                    log_callback=log,
+                )
+            except Exception as e:
+                log(f"登录失败: {e}", "red")
+                thread.done_signal.emit(1, 0)
+                return
             log("登录成功", "green")
 
             # 手动模式：直接从指定URL学习
@@ -911,7 +926,9 @@ class DashboardScreen(QWidget):
             tasks = []
             ws_locks = {}
 
-            while len(tasks) < cfg_workers and not no_more_pages:
+            # 采集第一页后立即开始学习，不等所有课程收集完
+            first_page_collected = False
+            while not first_page_collected:
                 workshops = await learner.get_workshops(page)
                 if not workshops:
                     no_more_pages = True
@@ -923,8 +940,12 @@ class DashboardScreen(QWidget):
                 )
                 tasks.extend(new_tasks)
                 ws_locks.update(new_locks)
-                if len(tasks) >= cfg_workers:
+                if tasks:
+                    # 有课程了，立即开始学习
+                    first_page_collected = True
                     break
+                # 当前页没有课程，翻页继续
+                log("当前页无可用课程，翻页继续...", "yellow")
                 moved = await learner.go_to_next_page(page)
                 if not moved:
                     no_more_pages = True
@@ -1011,6 +1032,7 @@ class DashboardScreen(QWidget):
         self.table.setItem(wid, 3, QTableWidgetItem(str(data.get("status", "-"))))
 
     def _on_hours(self, data):
+        import time as _time
         self.lbl_central.setText(f"集中培训: {data.get('central', 0):.1f} 学时")
         self.lbl_online.setText(f"网络自学: {data.get('online', 0):.1f} 学时")
         self.lbl_updated.setText(f"更新时间: {data.get('updated', '--')}")
@@ -1023,6 +1045,48 @@ class DashboardScreen(QWidget):
             self.progress_ring.setValue(pct)
             type_name = "集中培训" if goal_type == "central" else "网络自学"
             self.lbl_goal_info.setText(f"{type_name} {cur:.1f}/{goal_hours:.0f} 学时 ({pct}%)")
+
+            # ── ETA 计算 ──
+            now = _time.time()
+            if self._learn_start_time is None:
+                self._learn_start_time = now
+            self._progress_history.append((now, pct))
+            # 只保留最近 20 条
+            if len(self._progress_history) > 20:
+                self._progress_history = self._progress_history[-20:]
+
+            if pct >= 100:
+                self.lbl_eta.setText("预计剩余: 已完成 ✓")
+            elif len(self._progress_history) >= 2:
+                t0, p0 = self._progress_history[0]
+                t_last, p_last = self._progress_history[-1]
+                dt = t_last - t0
+                dp = p_last - p0
+                if dp > 0 and dt > 0:
+                    rate = dp / dt  # pct/秒
+                    remaining_pct = 100 - p_last
+                    eta_sec = remaining_pct / rate
+                    if eta_sec < 60:
+                        eta_str = f"{eta_sec:.0f} 秒"
+                    elif eta_sec < 3600:
+                        eta_str = f"{eta_sec/60:.0f} 分钟"
+                    else:
+                        eta_str = f"{eta_sec/3600:.1f} 小时"
+                    self.lbl_eta.setText(f"预计剩余: {eta_str}")
+                else:
+                    self.lbl_eta.setText("预计剩余: 计算中...")
+            elif pct > 0:
+                elapsed = now - self._learn_start_time
+                eta_sec = elapsed * (100 - pct) / pct
+                if eta_sec < 60:
+                    eta_str = f"{eta_sec:.0f} 秒"
+                elif eta_sec < 3600:
+                    eta_str = f"{eta_sec/60:.0f} 分钟"
+                else:
+                    eta_str = f"{eta_sec/3600:.1f} 小时"
+                self.lbl_eta.setText(f"预计剩余: {eta_str}")
+            else:
+                self.lbl_eta.setText("")
 
     def _on_done(self, success, failed):
         InfoBar.success("完成", f"学习流程结束，成功 {success} 门", parent=self, position=InfoBarPosition.TOP_RIGHT)
@@ -1431,12 +1495,20 @@ class MainWindow(MSFluentWindow):
 
 
 def main():
+    import os, platform
+    # 抑制 Qt 字体警告（macOS 上 "Segoe UI" 不存在）
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
     app = QApplication(sys.argv)
+    from PyQt5.QtGui import QFont
+    # 平台适配字体：macOS 用 PingFang SC，Windows 用 Microsoft YaHei，其他用系统默认
+    if platform.system() == "Darwin":
+        app.setFont(QFont("PingFang SC", 13))
+    elif platform.system() == "Windows":
+        app.setFont(QFont("Microsoft YaHei", 13))
+    else:
+        app.setFont(QFont("Noto Sans CJK SC", 13))
     app.setStyle("Windows")
     setTheme(Theme.AUTO)
-    # Fix font for macOS
-    from PyQt5.QtGui import QFont
-    app.setFont(QFont("PingFang SC", 13))
 
     window = MainWindow()
     window.show()

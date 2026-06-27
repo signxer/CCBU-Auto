@@ -408,13 +408,17 @@ class DashboardScreen(Screen):
 
             # Login
             log("正在登录...")
-            await learner.login(
-                page=learner.pages[0],
-                username=cfg_username,
-                password=cfg_password,
-                auto_login=cfg_auto_login,
-                log_callback=log,
-            )
+            try:
+                await learner.login(
+                    page=learner.pages[0],
+                    username=cfg_username,
+                    password=cfg_password,
+                    auto_login=cfg_auto_login,
+                    log_callback=log,
+                )
+            except Exception as e:
+                log(f"登录失败: {e}", "red")
+                return
             log("登录成功", "green")
 
             # Set goal
