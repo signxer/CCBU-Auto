@@ -1614,8 +1614,12 @@ class CCBULearner:
                 },
                 method: 'GET',
                 credentials: 'include'
-            }).then(r => {
-                if (!r.ok) return {error: 'HTTP ' + r.status};
+            }).then(async r => {
+                if (!r.ok) {
+                    let body = '';
+                    try { body = await r.text(); } catch(e) {}
+                    return {error: 'HTTP ' + r.status, body: body.slice(0, 200)};
+                }
                 return r.json();
             }).catch(e => ({error: e.message}));
         }"""
@@ -1635,8 +1639,15 @@ class CCBULearner:
                 await asyncio.sleep(0.5)
 
             if isinstance(result, dict) and result.get("error"):
-                _log(f"  API失败: {result['error']}", "red")
-                return None
+                err_msg = result['error']
+                body = result.get('body', '')
+                if 'HTTP 400' in err_msg and body:
+                    _log(f"  API失败: {err_msg} ({body[:80]})", "red")
+                else:
+                    _log(f"  API失败: {err_msg}", "red")
+                # 400是客户端错误，重试无意义，直接返回
+                if 'HTTP 4' in err_msg:
+                    return None
             if not isinstance(result, dict):
                 _log(f"  API返回异常: {type(result).__name__}", "red")
                 return None
@@ -2318,9 +2329,10 @@ class CCBULearner:
                         except:
                             pass
 
-                    # 获取课程列表：API重试（最多5次，递增等待）
+                    # 获取课程列表：API重试（最多5次，递增等待，400不重试）
                     courses = []
                     API_MAX_RETRIES = 5
+                    api_gave_up = False
                     for api_attempt in range(API_MAX_RETRIES):
                         if api_attempt > 0:
                             wait_sec = api_attempt * 3
@@ -2328,6 +2340,10 @@ class CCBULearner:
                             await asyncio.sleep(wait_sec)
                         try:
                             api_result = await self._get_courses_by_api(cp, ws_id, log_callback=_log)
+                            # api_result为None表示400等不可恢复错误，不重试
+                            if api_result is None:
+                                api_gave_up = True
+                                break
                             if api_result and isinstance(api_result, dict):
                                 data = api_result.get("contentList", [])
                                 if not data:
