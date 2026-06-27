@@ -2316,74 +2316,59 @@ class CCBULearner:
                         except:
                             pass
 
-                    # 获取课程列表：优先API，失败回退DOM+刷新
+                    # 获取课程列表：API重试（最多5次，递增等待）
                     courses = []
-
-                    # 方式1：专题班详情API
-                    try:
-                        api_result = await self._get_courses_by_api(cp, ws_id)
-                        if api_result and isinstance(api_result, dict):
-                            # 课程在 contentList 字段里
-                            data = api_result.get("contentList", [])
-                            if not data:
-                                # 兜底查找
-                                for key in ["courses", "knowledgeList", "courseList", "lessons"]:
-                                    val = api_result.get(key)
-                                    if isinstance(val, list) and len(val) > 0:
-                                        data = val
+                    API_MAX_RETRIES = 5
+                    for api_attempt in range(API_MAX_RETRIES):
+                        if api_attempt > 0:
+                            wait_sec = api_attempt * 3
+                            console.print(f"  API重试({api_attempt}/{API_MAX_RETRIES})，等{wait_sec}秒...", style="yellow")
+                            await asyncio.sleep(wait_sec)
+                        try:
+                            api_result = await self._get_courses_by_api(cp, ws_id)
+                            if api_result and isinstance(api_result, dict):
+                                data = api_result.get("contentList", [])
+                                if not data:
+                                    for key in ["courses", "knowledgeList", "courseList", "lessons"]:
+                                        val = api_result.get(key)
+                                        if isinstance(val, list) and len(val) > 0:
+                                            data = val
+                                            break
+                                if data and isinstance(data, list):
+                                    for item in data:
+                                        if not isinstance(item, dict):
+                                            continue
+                                        title = str(item.get("knowledgeName", item.get("title",
+                                            item.get("courseName", item.get("name", "")))))
+                                        ctype = str(item.get("kngType", item.get("type", "")))
+                                        if ctype in ("考试", "scorm", "ExamKnowledge", "ScormKnowledge"):
+                                            continue
+                                        if not title or len(title) <= 3:
+                                            continue
+                                        progress_val = item.get("progress", 0)
+                                        hours_val = item.get("hours", 0)
+                                        detail_url = item.get("kngDetailUrl", "")
+                                        course_id = item.get("knowledgeId", item.get("id", ""))
+                                        courses.append({
+                                            "title": title.strip(),
+                                            "type": ctype.strip(),
+                                            "required": "必修" if item.get("type") == 1 else "选修",
+                                            "hours": str(hours_val),
+                                            "progress": f"{float(progress_val)*100:.0f}%" if progress_val else "0%",
+                                            "action": "已学习" if progress_val and float(progress_val) >= 1 else "未学习",
+                                            "url": detail_url or course_id,
+                                        })
+                                    if courses:
+                                        console.print(f"  ✓ API获取 {len(courses)} 门课程", style="green")
                                         break
-                            if data and isinstance(data, list):
-                                for item in data:
-                                    if not isinstance(item, dict):
-                                        continue
-                                    title = str(item.get("knowledgeName", item.get("title",
-                                        item.get("courseName", item.get("name", "")))))
-                                    ctype = str(item.get("kngType", item.get("type", "")))
-                                    # 排除考试和scorm
-                                    if ctype in ("考试", "scorm", "ExamKnowledge", "ScormKnowledge"):
-                                        continue
-                                    if not title or len(title) <= 3:
-                                        continue
-                                    # 解析进度和学时
-                                    progress_val = item.get("progress", 0)
-                                    hours_val = item.get("hours", 0)
-                                    # 构造课程详情URL
-                                    detail_url = item.get("kngDetailUrl", "")
-                                    course_id = item.get("knowledgeId", item.get("id", ""))
-                                    courses.append({
-                                        "title": title.strip(),
-                                        "type": ctype.strip(),
-                                        "required": "必修" if item.get("type") == 1 else "选修",
-                                        "hours": str(hours_val),
-                                        "progress": f"{float(progress_val)*100:.0f}%" if progress_val else "0%",
-                                        "action": "已学习" if progress_val and float(progress_val) >= 1 else "未学习",
-                                        "url": detail_url or course_id,
-                                    })
-                                if courses:
-                                    console.print(f"  ✓ API获取 {len(courses)} 门课程", style="green")
+                                    else:
+                                        console.print(f"  API返回0门课程", style="yellow")
                                 else:
-                                    console.print(f"  API返回0门课程", style="yellow")
+                                    console.print(f"  API无课程数据", style="yellow")
                             else:
-                                console.print(f"  API无课程数据, keys: {list(api_result.keys())[:8]}", style="yellow")
-                    except Exception as e:
-                        console.print(f"  API异常: {e}", style="red")
-
-                    # 方式2：DOM方式（API失败时回退）
-                    if not courses:
-                        MAX_ATTEMPTS = 10
-                        for attempt in range(MAX_ATTEMPTS):
-                            if attempt > 0:
-                                console.print(f"  刷新重试({attempt}/{MAX_ATTEMPTS})...", style="yellow")
-                                try:
-                                    await cp.reload(wait_until="domcontentloaded", timeout=20000)
-                                    await cp.wait_for_timeout(3000)
-                                except:
-                                    pass
-                            result = await self.get_courses_from_workshop(cp, ws_title)
-                            if result is None:
-                                continue
-                            courses = result
-                            break
+                                console.print(f"  API返回异常", style="yellow")
+                        except Exception as e:
+                            console.print(f"  API异常: {e}", style="red")
 
                     if courses is None:
                         courses = []
