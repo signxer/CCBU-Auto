@@ -1397,22 +1397,36 @@ class DashboardScreen(QWidget):
 
 # ─── Main Window ───────────────────────────────────────────────────
 
-# macOS: FluentWindow + 原生交通灯（左侧）
-# Windows: MSFluentWindow（Win11风格）
-_BaseWindow = FluentWindow if sys.platform == "darwin" else MSFluentWindow
+if sys.platform == "darwin":
+    from PyQt5.QtWidgets import QMainWindow, QStackedWidget, QWidget, QVBoxLayout
 
+    class MainWindow(QMainWindow):
+        """macOS原生窗口：交通灯在左侧，不使用无边框方案"""
 
-class MainWindow(_BaseWindow):
-    def __init__(self):
-        super().__init__()
-        if sys.platform == "darwin":
-            # 显示macOS原生交通灯（close/min/max在左侧）
-            self.setSystemTitleBarButtonVisible(True)
-            # 隐藏FluentTitleBar自带的右侧按钮
-            bar = self.titleBar
-            bar.minBtn.hide()
-            bar.maxBtn.hide()
-            bar.closeBtn.hide()
+        class _NavStub:
+            """兼容MSFluentWindow的navigationInterface.hide()调用"""
+            def hide(self): pass
+            def show(self): pass
+
+        def __init__(self):
+            super().__init__()
+            self._stack = QStackedWidget()
+            self.setCentralWidget(self._stack)
+            self.navigationInterface = self._NavStub()
+
+        def addSubInterface(self, widget, icon, text, **kw):
+            self._stack.addWidget(widget)
+
+        def switchTo(self, widget):
+            self._stack.setCurrentWidget(widget)
+
+        def setTitleBar(self, bar):
+            pass  # macOS用原生标题栏，忽略setTitleBar
+
+else:
+    class MainWindow(MSFluentWindow):
+        def __init__(self):
+            super().__init__()
         self.setWindowTitle("CCBU-Auto 自动学习")
         self.resize(1000, 650)
         self.setMinimumSize(800, 500)
