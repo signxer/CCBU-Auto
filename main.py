@@ -214,34 +214,20 @@ class CCBULearner:
         else:
             self.context = await self.browser.new_context(**context_opts)
 
-        # 禁用反调试debugger语句（页面JS里的debugger会导致暂停执行）
-        await self.context.add_init_script("""
-            // 覆盖Function构造器，过滤debugger
-            const _origFunction = Function;
-            window.Function = function(...args) {
-                if (args.length > 0) {
-                    const lastArg = args[args.length - 1];
-                    if (typeof lastArg === 'string') {
-                        args[args.length - 1] = lastArg.replace(/debugger/g, '');
-                    }
-                }
-                return new _origFunction(...args);
-            };
-            window.Function.prototype = _origFunction.prototype;
-
-            // 拦截eval中的debugger
-            const _origEval = window.eval;
-            window.eval = function(code) {
-                if (typeof code === 'string') {
-                    code = code.replace(/debugger/g, '');
-                }
-                return _origEval.call(this, code);
-            };
-        """)
-        
         for i in range(self.workers):
-            page = await self.context.new_page()
+            page = await self._new_page_antidebug()
             self.pages.append(page)
+
+    async def _new_page_antidebug(self):
+        """创建页面并通过CDP禁用debugger暂停（不影响JS运行时，不破坏webpack）"""
+        page = await self.context.new_page()
+        try:
+            cdp = await self.context.new_cdp_session(page)
+            await cdp.send("Debugger.enable")
+            await cdp.send("Debugger.setSkipAllPauses", {"skip": True})
+        except Exception as e:
+            debug(f"CDP反调试设置失败(非致命): {e}")
+        return page
 
     async def close(self):
         # 先关闭所有页面和弹窗
@@ -2039,7 +2025,7 @@ class CCBULearner:
 
         cp = None
         try:
-            cp = await self.context.new_page()
+            cp = await self._new_page_antidebug()
             # 1. 导航到列表页
             list_url = "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise"
             await cp.goto(list_url, wait_until="domcontentloaded", timeout=20000)
@@ -2180,7 +2166,7 @@ class CCBULearner:
         collect_pages = []
         for _ in range(COLLECT_CONCURRENCY):
             try:
-                collect_pages.append(await self.context.new_page())
+                collect_pages.append(await self._new_page_antidebug())
             except:
                 pass
 
@@ -2235,7 +2221,7 @@ class CCBULearner:
 
                 # 每个专题班创建新页面（避免SPA状态累积导致后面失败）
                 try:
-                    cp = await self.context.new_page()
+                    cp = await self._new_page_antidebug()
                 except:
                     pass
                 try:
@@ -2894,7 +2880,7 @@ class CCBULearner:
                                     except:
                                         pass
                                     try:
-                                        self.pages[wid] = await self.context.new_page()
+                                        self.pages[wid] = await self._new_page_antidebug()
                                     except:
                                         pass
                                 else:
