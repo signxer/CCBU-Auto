@@ -1398,35 +1398,33 @@ class DashboardScreen(QWidget):
 # ─── Main Window ───────────────────────────────────────────────────
 
 if sys.platform == "darwin":
-    from PyQt5.QtWidgets import QMainWindow, QStackedWidget, QWidget, QVBoxLayout
+    from PyQt5.QtWidgets import QMainWindow, QStackedWidget
 
-    class MainWindow(QMainWindow):
+    class _BaseWindow(QMainWindow):
         """macOS原生窗口：交通灯在左侧，不使用无边框方案"""
-
-        class _NavStub:
-            """兼容MSFluentWindow的navigationInterface.hide()调用"""
-            def hide(self): pass
-            def show(self): pass
-
         def __init__(self):
             super().__init__()
             self._stack = QStackedWidget()
             self.setCentralWidget(self._stack)
-            self.navigationInterface = self._NavStub()
-
         def addSubInterface(self, widget, icon, text, **kw):
             self._stack.addWidget(widget)
-
         def switchTo(self, widget):
             self._stack.setCurrentWidget(widget)
-
-        def setTitleBar(self, bar):
-            pass  # macOS用原生标题栏，忽略setTitleBar
-
+        class _NavStub:
+            def hide(self): pass
+            def show(self): pass
+        @property
+        def navigationInterface(self):
+            if not hasattr(self, '_nav'):
+                self._nav = self._NavStub()
+            return self._nav
 else:
-    class MainWindow(MSFluentWindow):
-        def __init__(self):
-            super().__init__()
+    _BaseWindow = MSFluentWindow
+
+
+class MainWindow(_BaseWindow):
+    def __init__(self):
+        super().__init__()
         self.setWindowTitle("CCBU-Auto 自动学习")
         self.resize(1000, 650)
         self.setMinimumSize(800, 500)
@@ -1504,14 +1502,16 @@ else:
             return False
 
     def mousePressEvent(self, event):
-        if event.button() == Qt.LeftButton:
-            self._drag_pos = event.globalPos() - self.pos()
-            event.accept()
+        if sys.platform != "darwin":  # macOS原生窗口自带拖拽
+            if event.button() == Qt.LeftButton:
+                self._drag_pos = event.globalPos() - self.pos()
+                event.accept()
 
     def mouseMoveEvent(self, event):
-        if self._drag_pos and event.buttons() == Qt.LeftButton:
-            self.move(event.globalPos() - self._drag_pos)
-            event.accept()
+        if sys.platform != "darwin":
+            if self._drag_pos and event.buttons() == Qt.LeftButton:
+                self.move(event.globalPos() - self._drag_pos)
+                event.accept()
 
     def mouseReleaseEvent(self, event):
         self._drag_pos = None
