@@ -16,6 +16,17 @@ from typing import List, Dict, Optional
 if platform.system() == "Windows":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
+# 跨平台快捷键
+_SELECT_ALL = "Meta+a" if platform.system() != "Windows" else "Control+a"
+
+# Windows ANSI转义码支持
+if platform.system() == "Windows":
+    try:
+        import colorama
+        colorama.init()
+    except ImportError:
+        pass
+
 import click
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright, Browser, Page, BrowserContext
@@ -26,12 +37,44 @@ from rich.table import Table
 load_dotenv()
 console = Console()
 
-# 存储文件路径
-STORAGE_STATE_PATH = "ccbu_session.json"
-USER_CREDENTIALS_PATH = "ccbu_credentials.json"
-TAGS_STATE_PATH = "ccbu_tags.json"
-CONFIG_PATH = "ccbu_config.json"
-PROGRESS_PATH = "ccbu_progress.json"
+
+class GoalReached(Exception):
+    """学习目标已达成，通知上层清理退出"""
+    pass
+
+
+def _kill_playwright_chrome():
+    """清理Playwright残留的Chrome进程（不影响用户自己的浏览器）"""
+    import subprocess
+    try:
+        if sys.platform == "win32":
+            # 用PowerShell只杀带--remote-debugging的Chrome（Playwright启动的）
+            subprocess.run(
+                ["powershell", "-Command",
+                 "Get-CimInstance Win32_Process -Filter \"Name='chrome.exe'\" "
+                 "| Where-Object {$_.CommandLine -match '--remote-debugging'} "
+                 "| Stop-Process -Force"],
+                stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+        else:
+            subprocess.run(["pkill", "-f", "chrome-headless-shell"],
+                          stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+            subprocess.run(["pkill", "-f", "chromium.*--remote-debugging"],
+                          stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
+    except:
+        pass
+
+
+# 存储文件路径（基于脚本/可执行文件所在目录，兼容PyInstaller打包）
+if getattr(sys, 'frozen', False):
+    _BASE_DIR = os.path.dirname(sys.executable)
+else:
+    _BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+STORAGE_STATE_PATH = os.path.join(_BASE_DIR, "ccbu_session.json")
+USER_CREDENTIALS_PATH = os.path.join(_BASE_DIR, "ccbu_credentials.json")
+TAGS_STATE_PATH = os.path.join(_BASE_DIR, "ccbu_tags.json")
+CONFIG_PATH = os.path.join(_BASE_DIR, "ccbu_config.json")
+PROGRESS_PATH = os.path.join(_BASE_DIR, "ccbu_progress.json")
 
 
 def safe_print(text, style=None):
@@ -82,8 +125,10 @@ def _stdin_reader_thread():
             break
 
 
-_stdin_thread = threading.Thread(target=_stdin_reader_thread, daemon=True)
-_stdin_thread.start()
+# 仅CLI模式启动stdin读取线程，GUI导入时不应启动（避免与PyQt5竞争stdin）
+if __name__ == "__main__" or "main" in sys.argv[0]:
+    _stdin_thread = threading.Thread(target=_stdin_reader_thread, daemon=True)
+    _stdin_thread.start()
 
 
 async def async_input(prompt: str, default: str = "y", timeout: int = 5,
@@ -138,19 +183,7 @@ class CCBULearner:
 
     async def init(self):
         # 清理Playwright残留的chromium进程（不影响用户自己的浏览器）
-        import subprocess, sys
-        try:
-            if sys.platform == "win32":
-                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
-                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-            else:
-                # 只杀Playwright残留进程，不杀用户自己的浏览器
-                subprocess.run(["pkill", "-f", "chrome-headless-shell"],
-                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-                subprocess.run(["pkill", "-f", "chromium.*--remote-debugging"],
-                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-        except:
-            pass
+        _kill_playwright_chrome()
 
         self.playwright = await async_playwright().start()
         # 优先使用系统Chrome，找不到再用内置Chromium
@@ -197,10 +230,9 @@ class CCBULearner:
             else:
                 raise
         
-        # 创建浏览器上下文
+        # 创建浏览器上下文（不硬编码user_agent，让Playwright自动匹配当前OS）
         context_opts = {
             "viewport": {"width": 1920, "height": 1080},
-            "user_agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         }
         if os.path.exists(STORAGE_STATE_PATH):
             try:
@@ -254,19 +286,7 @@ class CCBULearner:
                 pass
         
         # 强制结束Playwright残留进程
-        import subprocess, sys
-        try:
-            if sys.platform == "win32":
-                # Windows: 用wmic查找并杀掉Playwright的chrome进程
-                subprocess.run(["taskkill", "/F", "/IM", "chrome.exe"],
-                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-            else:
-                subprocess.run(["pkill", "-f", "chrome-headless-shell"],
-                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-                subprocess.run(["pkill", "-f", "chromium.*--remote-debugging"],
-                              stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL, timeout=5)
-        except:
-            pass
+        _kill_playwright_chrome()
 
     async def check_login_status(self, page: Page) -> bool:
         """检查是否已登录 - 通过页面真实DOM状态检测"""
@@ -491,7 +511,7 @@ class CCBULearner:
             console.print(f"  实际填入: [{actual_uname}]", style="blue")
             if len(actual_uname) < len(username):
                 console.print("输入不完整，尝试逐字符键盘输入...", style="yellow")
-                await page.keyboard.press("Meta+a")
+                await page.keyboard.press(_SELECT_ALL)
                 await page.keyboard.press("Backspace")
                 await page.wait_for_timeout(300)
                 await page.keyboard.type(username, delay=150)
@@ -631,7 +651,7 @@ class CCBULearner:
                         }""")
                         if len(actual_uname) < len(username):
                             console.print("输入不完整，用键盘补充...", style="yellow")
-                            await page.keyboard.press("Meta+a")
+                            await page.keyboard.press(_SELECT_ALL)
                             await page.keyboard.press("Backspace")
                             await page.wait_for_timeout(300)
                             await page.keyboard.type(username, delay=150)
@@ -1963,8 +1983,7 @@ class CCBULearner:
                     console.print(f"网络自学: {cur:.1f}/{self.study_goal} 学时", style="blue")
                     if cur >= self.study_goal:
                         console.print("已达到学习目标! 程序退出", style="bold green")
-                        import sys
-                        sys.exit(0)
+                        raise GoalReached()
 
         tasks = []
         for wid in range(nw):
@@ -2791,8 +2810,7 @@ class CCBULearner:
                             _cur = _h.get(self.goal_type, 0)
                             if _cur >= self.study_goal:
                                 update_status(w_id, status="目标达成!")
-                                import sys
-                                sys.exit(0)
+                                raise GoalReached()
                     except:
                         pass
 
@@ -3473,4 +3491,6 @@ def clear():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     cli()

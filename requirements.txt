@@ -3,3 +3,6 @@ click>=8.0.0
 python-dotenv>=1.0.0
 rich>=13.0.0
 PyQt-Fluent-Widgets>=1.5.0
+PyQt5>=5.15.0
+textual>=0.40.0
+colorama>=0.4.6

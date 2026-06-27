@@ -3,6 +3,11 @@
 import asyncio
 import sys
 import os
+import platform
+
+# Windows需要ProactorEventLoop才能支持subprocess等
+if platform.system() == "Windows":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from playwright.async_api import async_playwright
 
 # 要测试的专题班ID（从debug日志中提取的失败案例）

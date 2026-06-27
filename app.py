@@ -4,6 +4,11 @@ import asyncio
 import json
 import os
 import sys
+import platform
+
+# Windows需要ProactorEventLoop才能支持subprocess等
+if platform.system() == "Windows":
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 from datetime import datetime
 
 from textual.app import App, ComposeResult
@@ -28,7 +33,7 @@ from textual.widgets import (
 )
 
 # Import CCBULearner from main.py
-from main import CCBULearner, CONFIG_PATH, PROGRESS_PATH, STORAGE_STATE_PATH
+from main import CCBULearner, CONFIG_PATH, PROGRESS_PATH, STORAGE_STATE_PATH, USER_CREDENTIALS_PATH
 
 # ─── Messages (worker → UI) ────────────────────────────────────────
 
@@ -141,7 +146,7 @@ class LoginScreen(Screen):
     def compose(self) -> ComposeResult:
         # Load saved credentials
         creds = {}
-        creds_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_credentials.json")
+        creds_path = USER_CREDENTIALS_PATH
         if os.path.exists(creds_path):
             try:
                 with open(creds_path, "r", encoding="utf-8") as f:
@@ -182,7 +187,7 @@ class LoginScreen(Screen):
             self.app.cfg_auto_login = auto
 
             # Save credentials
-            creds_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_credentials.json")
+            creds_path = USER_CREDENTIALS_PATH
             try:
                 with open(creds_path, "w", encoding="utf-8") as f:
                     json.dump({"username": username, "password": password}, f, ensure_ascii=False, indent=2)
@@ -204,7 +209,7 @@ class GoalScreen(Screen):
     def compose(self) -> ComposeResult:
         # Load saved goal
         goal_cfg = {}
-        goal_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_config.json")
+        goal_path = CONFIG_PATH
         if os.path.exists(goal_path):
             try:
                 with open(goal_path, "r", encoding="utf-8") as f:
@@ -255,7 +260,7 @@ class GoalScreen(Screen):
             self.app.switch_screen("tag")
 
     def _save_goal(self, goal_type, hours):
-        cfg_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_config.json")
+        cfg_path = CONFIG_PATH
         try:
             cfg = {}
             if os.path.exists(cfg_path):
@@ -621,4 +626,6 @@ def main():
 
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

@@ -33,7 +33,7 @@ from qfluentwidgets import (
     isDarkTheme, setTheme, Theme,
 )
 
-from main import CCBULearner, CONFIG_PATH, PROGRESS_PATH, STORAGE_STATE_PATH
+from main import CCBULearner, CONFIG_PATH, PROGRESS_PATH, STORAGE_STATE_PATH, USER_CREDENTIALS_PATH
 
 
 # ─── Async Thread ──────────────────────────────────────────────────
@@ -53,7 +53,10 @@ class AsyncThread(QThread):
         self._coro_func = coro_func
 
     def run(self):
-        loop = asyncio.new_event_loop()
+        if sys.platform == "win32":
+            loop = asyncio.ProactorEventLoop()
+        else:
+            loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
             loop.run_until_complete(self._coro_func(self))
@@ -177,7 +180,7 @@ class LoginScreen(QWidget):
         self._build_ui()
 
     def _load_creds(self):
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_credentials.json")
+        path = USER_CREDENTIALS_PATH
         self._creds = {}
         if os.path.exists(path):
             try:
@@ -269,7 +272,7 @@ class LoginScreen(QWidget):
             InfoBar.warning("提示", "请输入账号", parent=self, position=InfoBarPosition.TOP)
             return
 
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_credentials.json")
+        path = USER_CREDENTIALS_PATH
         try:
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"username": username, "password": password}, f, ensure_ascii=False, indent=2)
@@ -1457,7 +1460,7 @@ class MainWindow(MSFluentWindow):
             self.cfg_goal_hours = cfg.get("study_goal", 0)
             self.cfg_tags = cfg.get("selected_tags", [])
             # 加载账号
-            creds_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ccbu_credentials.json")
+            creds_path = USER_CREDENTIALS_PATH
             if os.path.exists(creds_path):
                 with open(creds_path, "r", encoding="utf-8") as f:
                     creds = json.load(f)
@@ -1530,7 +1533,8 @@ class MainWindow(MSFluentWindow):
 
 
 def main():
-    import os, platform
+    import os, platform, multiprocessing
+    multiprocessing.freeze_support()
     # 抑制 Qt 字体警告（macOS 上 "Segoe UI" 不存在）
     os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
     app = QApplication(sys.argv)
