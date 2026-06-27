@@ -1390,10 +1390,25 @@ class DashboardScreen(QWidget):
 
 # ─── Main Window ───────────────────────────────────────────────────
 
+# macOS: 用FluentWindow，按钮在左侧（原生风格）
+# Windows: 用MSFluentWindow，按钮在右侧（Win11风格）
+_BaseWindow = FluentWindow if sys.platform == "darwin" else MSFluentWindow
 
-class MainWindow(MSFluentWindow):
+
+class MainWindow(_BaseWindow):
     def __init__(self):
         super().__init__()
+        # macOS: 把标题栏按钮移到左侧（交通灯风格）
+        if sys.platform == "darwin":
+            bar = self.titleBar
+            bar.vBoxLayout.removeWidget(bar.minBtn)
+            bar.vBoxLayout.removeWidget(bar.maxBtn)
+            bar.vBoxLayout.removeWidget(bar.closeBtn)
+            # 重新插入到最左侧：close, min, max（macOS原生顺序）
+            bar.hBoxLayout.insertWidget(0, bar.closeBtn, 0, Qt.AlignLeft | Qt.AlignVCenter)
+            bar.hBoxLayout.insertWidget(1, bar.minBtn, 0, Qt.AlignLeft | Qt.AlignVCenter)
+            bar.hBoxLayout.insertWidget(2, bar.maxBtn, 0, Qt.AlignLeft | Qt.AlignVCenter)
+            bar.hBoxLayout.insertSpacing(3, 8)
         self.setWindowTitle("CCBU-Auto 自动学习")
         self.resize(1000, 650)
         self.setMinimumSize(800, 500)
