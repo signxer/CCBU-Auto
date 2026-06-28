@@ -2854,12 +2854,19 @@ class CCBULearner:
             tasks.append(asyncio.create_task(worker(w_id, self.pages[w_id])))
             await asyncio.sleep(2)
 
+        # 定时采集学时间隔（秒）
+        HOURS_CHECK_INTERVAL = 60
+
         # 心跳检测 + 刷新
         async def refresh_display():
             import time
+            last_hours_check = time.time()
             while not all(t.done() for t in tasks):
-                # Textual模式：推送学时更新
-                if hours_callback:
+                now = time.time()
+
+                # 定时采集总体学习进度（两种模式统一处理）
+                if now - last_hours_check >= HOURS_CHECK_INTERVAL:
+                    last_hours_check = now
                     try:
                         _h = await self._get_study_hours(self.pages[0])
                         _info = {
@@ -2868,11 +2875,20 @@ class CCBULearner:
                             "updated": datetime.now().strftime("%H:%M:%S"),
                         }
                         study_hours_info.update(_info)
-                        hours_callback(_info)
+                        if hours_callback:
+                            hours_callback(_info)
+                        # 定时检查目标学时（避免因平台统计延迟导致多学）
+                        if self.study_goal > 0:
+                            _cur = _h.get(self.goal_type, 0)
+                            if _cur >= self.study_goal:
+                                raise GoalReached()
+                    except GoalReached:
+                        raise
                     except:
                         pass
+
                 # Rich模式：更新Live表格
-                elif live_ctx:
+                if live_ctx:
                     live_ctx.update(make_progress_table())
 
                 await asyncio.sleep(2)
@@ -2912,23 +2928,47 @@ class CCBULearner:
             # Textual模式：不使用Rich Live
             live_ctx = None
             refresh_task = asyncio.create_task(refresh_display())
-            await asyncio.gather(*tasks, return_exceptions=True)
-            refresh_task.cancel()
-            try:
-                await refresh_task
-            except asyncio.CancelledError:
-                pass
+            _done, _pending = await asyncio.wait(
+                [refresh_task, *tasks], return_when=asyncio.FIRST_EXCEPTION)
+            for p in _pending:
+                p.cancel()
+                try:
+                    await p
+                except (asyncio.CancelledError, Exception):
+                    pass
+            for d in _done:
+                if d is not refresh_task:
+                    try:
+                        d.result()
+                    except GoalReached:
+                        for t in tasks:
+                            if not t.done():
+                                t.cancel()
+                    except:
+                        pass
         else:
             # CLI模式：使用Rich Live
             with Live(make_progress_table(), console=console, refresh_per_second=1) as live:
                 live_ctx = live
                 refresh_task = asyncio.create_task(refresh_display())
-                await asyncio.gather(*tasks, return_exceptions=True)
-                refresh_task.cancel()
-                try:
-                    await refresh_task
-                except asyncio.CancelledError:
-                    pass
+                _done, _pending = await asyncio.wait(
+                    [refresh_task, *tasks], return_when=asyncio.FIRST_EXCEPTION)
+                for p in _pending:
+                    p.cancel()
+                    try:
+                        await p
+                    except (asyncio.CancelledError, Exception):
+                        pass
+                for d in _done:
+                    if d is not refresh_task:
+                        try:
+                            d.result()
+                        except GoalReached:
+                            for t in tasks:
+                                if not t.done():
+                                    t.cancel()
+                        except:
+                            pass
 
         if log_callback:
             log_callback(f"学习任务完成: 成功 {completed_count[0]} 门, 失败 {failed[0]} 门", "bold green")
