@@ -114,78 +114,67 @@ class ConfigScreen(QWidget):
         self.spin_workers.setFixedWidth(120)
         w_layout.addWidget(self.spin_workers)
         w_layout.addWidget(BodyLabel("个线程"))
-        w_layout.addStretch()
-
-        w_hint = CaptionLabel("同时学习的课程数量，建议 3-10")
+        w_hint = CaptionLabel("建议 3-10")
         w_hint.setForegroundRole(self.palette().PlaceholderText)
-
-        w_container = QVBoxLayout()
-        w_container.setSpacing(4)
-        w_container.addLayout(w_layout)
-        w_container.addWidget(w_hint)
-        workers_card.viewLayout.addLayout(w_container)
+        w_layout.addWidget(w_hint)
+        w_layout.addStretch()
+        workers_card.viewLayout.addLayout(w_layout)
         layout.addWidget(workers_card)
 
-        # Headless card
-        headless_card = HeaderCardWidget(self)
-        headless_card.setTitle("浏览器模式")
-        headless_card.setBorderRadius(8)
-        h_layout = QHBoxLayout()
-        h_layout.setSpacing(12)
+        # Browser settings card (headless + engine merged)
+        browser_card = HeaderCardWidget(self)
+        browser_card.setTitle("浏览器设置")
+        browser_card.setBorderRadius(8)
+        card_layout = QVBoxLayout()
+        card_layout.setSpacing(10)
+        card_layout.setContentsMargins(0, 8, 0, 8)
 
+        # Row 1: Headless
+        row1 = QHBoxLayout()
+        row1.setSpacing(12)
         self.switch_headless = SwitchButton()
         self.switch_headless.setChecked(self._saved.get("headless", True))
         self.switch_headless.setOnText("后台运行")
         self.switch_headless.setOffText("显示浏览器")
-        h_label = BodyLabel("无头模式下浏览器不显示界面，适合后台挂机")
-        h_label.setForegroundRole(self.palette().PlaceholderText)
-        h_layout.addWidget(self.switch_headless)
-        h_layout.addWidget(h_label)
-        h_layout.addStretch()
-        headless_card.viewLayout.addLayout(h_layout)
-        layout.addWidget(headless_card)
+        row1.addWidget(BodyLabel("无头模式:"))
+        row1.addWidget(self.switch_headless)
+        row1.addStretch()
+        card_layout.addLayout(row1)
 
-        # Browser engine card
-        browser_card = HeaderCardWidget(self)
-        browser_card.setTitle("浏览器引擎")
-        browser_card.setBorderRadius(8)
-        b_layout = QVBoxLayout()
-        b_layout.setSpacing(8)
-        b_layout.setContentsMargins(0, 8, 0, 8)
-
-        # Windows 默认 chrome，其他默认 chromium
+        # Row 2: Browser engine
         import platform
         default_browser = "chrome" if platform.system() == "Windows" else "chromium"
         saved_browser = self._saved.get("browser", default_browser)
 
-        self.radio_chrome = RadioButton("本地 Chrome")
-        self.radio_chromium = RadioButton("内置 Chromium")
-        if saved_browser == "chrome":
-            self.radio_chrome.setChecked(True)
-        else:
-            self.radio_chromium.setChecked(True)
-        b_layout.addWidget(self.radio_chrome)
-        b_layout.addWidget(self.radio_chromium)
+        row2 = QHBoxLayout()
+        row2.setSpacing(12)
+        self.switch_browser = SwitchButton()
+        self.switch_browser.setChecked(saved_browser == "chrome")
+        self.switch_browser.setOnText("本地 Chrome")
+        self.switch_browser.setOffText("内置 Chromium")
+        row2.addWidget(BodyLabel("浏览器引擎:"))
+        row2.addWidget(self.switch_browser)
+        row2.addStretch()
+        card_layout.addLayout(row2)
 
-        # Chrome 路径输入（可选）
+        # Row 3: Chrome path (only when using local Chrome)
         self.chrome_path_widget = QWidget()
-        path_layout = QHBoxLayout(self.chrome_path_widget)
-        path_layout.setContentsMargins(24, 4, 0, 0)
-        path_layout.setSpacing(8)
-        path_layout.addWidget(BodyLabel("路径:"))
+        path_row = QHBoxLayout(self.chrome_path_widget)
+        path_row.setContentsMargins(0, 0, 0, 0)
+        path_row.setSpacing(8)
+        path_row.addWidget(BodyLabel("Chrome路径:"))
         self.input_chrome_path = LineEdit()
         self.input_chrome_path.setPlaceholderText("留空自动检测")
         self.input_chrome_path.setText(self._saved.get("chrome_path", ""))
-        self.input_chrome_path.setFixedWidth(280)
-        path_layout.addWidget(self.input_chrome_path)
-        path_layout.addStretch()
-        b_layout.addWidget(self.chrome_path_widget)
+        self.input_chrome_path.setFixedWidth(250)
+        path_row.addWidget(self.input_chrome_path)
+        path_row.addStretch()
+        card_layout.addWidget(self.chrome_path_widget)
         self.chrome_path_widget.setVisible(saved_browser == "chrome")
 
-        # 切换时显隐路径输入
-        self.radio_chrome.toggled.connect(lambda checked: self.chrome_path_widget.setVisible(checked))
+        self.switch_browser.checkedChanged.connect(lambda checked: self.chrome_path_widget.setVisible(checked))
 
-        browser_card.viewLayout.addLayout(b_layout)
+        browser_card.viewLayout.addLayout(card_layout)
         layout.addWidget(browser_card)
 
         layout.addStretch()
@@ -204,8 +193,8 @@ class ConfigScreen(QWidget):
     def _on_start(self):
         workers = self.spin_workers.value()
         headless = self.switch_headless.isChecked()
-        browser = "chrome" if self.radio_chrome.isChecked() else "chromium"
-        chrome_path = self.input_chrome_path.text().strip() if self.radio_chrome.isChecked() else ""
+        browser = "chrome" if self.switch_browser.isChecked() else "chromium"
+        chrome_path = self.input_chrome_path.text().strip() if self.switch_browser.isChecked() else ""
         try:
             cfg = {}
             if os.path.exists(CONFIG_PATH):
