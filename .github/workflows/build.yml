@@ -28,12 +28,9 @@ jobs:
         shell: bash
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_OUTPUT
 
-      - name: Install Playwright browsers and build
+      - name: Build GUI EXE
         shell: bash
-        run: |
-          export PLAYWRIGHT_BROWSERS_PATH=0
-          python -m playwright install chromium
-          pyinstaller -F -w --icon=icon.ico --add-data="icon.png;." --name=CCBU-Auto gui.py
+        run: pyinstaller -F -w --icon=icon.ico --add-data="icon.png;." --name=CCBU-Auto gui.py
 
       - name: Rename
         shell: bash
@@ -82,15 +79,20 @@ jobs:
           iconutil -c icns icon.iconset -o icon.icns
           rm -rf icon.iconset
 
-      - name: Install Playwright browsers locally
+      - name: Clean Playwright local browsers
         run: |
-          export PLAYWRIGHT_BROWSERS_PATH=0
-          python3 -m playwright install chromium
+          # 删除 Playwright 包内的本地浏览器缓存
+          python3 -c "
+          import playwright, os, shutil
+          pkg_dir = os.path.dirname(playwright.__file__)
+          for root, dirs, files in os.walk(pkg_dir):
+              if '.local-browsers' in dirs:
+                  shutil.rmtree(os.path.join(root, '.local-browsers'))
+                  print(f'Removed: {os.path.join(root, \".local-browsers\")}')
+          "
 
       - name: Build GUI .app
-        run: |
-          export PLAYWRIGHT_BROWSERS_PATH=0
-          pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --name=CCBU-Auto gui.py
+        run: pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --name=CCBU-Auto gui.py
 
       - name: Create DMG
         run: |
