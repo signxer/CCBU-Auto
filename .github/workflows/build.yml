@@ -33,7 +33,7 @@ jobs:
 
       - name: Rename
         shell: bash
-        run: mv dist/CCBU-Auto.exe "dist/润物细无声-${{ steps.version.outputs.VERSION }}-Windows.exe"
+        run: mv dist/CCBU-Auto.exe "dist/CCBU-Auto-${{ steps.version.outputs.VERSION }}-Windows.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -79,17 +79,17 @@ jobs:
           rm -rf icon.iconset
 
       - name: Build GUI .app
-        run: pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --name="润物细无声" gui.py
+        run: pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --name="CCBU-Auto" gui.py
 
       - name: Create DMG
         run: |
           mkdir -p dmg-dist
-          cp -r "dist/润物细无声.app" dmg-dist/
+          cp -r "dist/CCBU-Auto.app" dmg-dist/
           ln -sf /Applications dmg-dist/Applications
-          hdiutil create -volname "润物细无声" \
+          hdiutil create -volname "CCBU-Auto" \
             -srcfolder dmg-dist \
             -ov -format UDZO \
-            "dist/润物细无声-${{ steps.version.outputs.VERSION }}-macOS.dmg"
+            "dist/CCBU-Auto-${{ steps.version.outputs.VERSION }}-macOS.dmg"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
