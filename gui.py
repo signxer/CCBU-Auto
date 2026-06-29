@@ -168,6 +168,11 @@ class ConfigScreen(QWidget):
         self.input_chrome_path.setText(self._saved.get("chrome_path", ""))
         self.input_chrome_path.setFixedWidth(250)
         path_row.addWidget(self.input_chrome_path)
+
+        btn_browse = PushButton("浏览")
+        btn_browse.setFixedWidth(60)
+        btn_browse.clicked.connect(self._browse_chrome)
+        path_row.addWidget(btn_browse)
         path_row.addStretch()
         card_layout.addWidget(self.chrome_path_widget)
         self.chrome_path_widget.setVisible(saved_browser == "chrome")
@@ -189,6 +194,22 @@ class ConfigScreen(QWidget):
         btn_layout.addWidget(self.btn_start)
         btn_layout.addStretch()
         layout.addLayout(btn_layout)
+
+    def _browse_chrome(self):
+        from PyQt5.QtWidgets import QFileDialog
+        import platform
+        if platform.system() == "Windows":
+            default_dir = r"C:\Program Files\Google\Chrome\Application"
+        elif platform.system() == "Darwin":
+            default_dir = "/Applications/Google Chrome.app/Contents/MacOS"
+        else:
+            default_dir = "/usr/bin"
+        path, _ = QFileDialog.getOpenFileName(
+            self, "选择 Chrome 可执行文件", default_dir,
+            "Chrome (chrome*);;所有文件 (*)"
+        )
+        if path:
+            self.input_chrome_path.setText(path)
 
     def _on_start(self):
         workers = self.spin_workers.value()
@@ -1720,7 +1741,7 @@ class MainWindow(_BaseWindow):
         # Config state
         self.cfg_workers = 1
         self.cfg_headless = True
-        self.cfg_browser = "chromium"  # chromium/chrome
+        self.cfg_browser = "chrome" if platform.system() == "Windows" else "chromium"
         self.cfg_chrome_path = ""
         self.cfg_username = ""
         self.cfg_password = ""
@@ -1788,7 +1809,8 @@ class MainWindow(_BaseWindow):
                 return False
             self.cfg_workers = cfg.get("workers", 1)
             self.cfg_headless = cfg.get("headless", True)
-            self.cfg_browser = cfg.get("browser", "chromium")
+            default_browser = "chrome" if platform.system() == "Windows" else "chromium"
+            self.cfg_browser = cfg.get("browser", default_browser)
             self.cfg_chrome_path = cfg.get("chrome_path", "")
             self.cfg_central_goal = cfg.get("central_goal", 0)
             self.cfg_online_goal = cfg.get("online_goal", 0)
