@@ -871,22 +871,23 @@ class DashboardScreen(QWidget):
             self.table.setItem(i, 3, QTableWidgetItem("等待中"))
 
     def _set_goal_info(self, win):
-        mode = getattr(win, "cfg_goal_mode", "none")
         c_goal = getattr(win, "cfg_central_goal", 0)
         o_goal = getattr(win, "cfg_online_goal", 0)
-        if mode == "none":
+        c_mode = getattr(win, "cfg_central_mode", "target")
+        o_mode = getattr(win, "cfg_online_mode", "target")
+
+        if c_goal <= 0 and o_goal <= 0:
             self.lbl_goal_info.setText("不学习")
-        elif mode == "unlimited":
-            self.lbl_goal_info.setText("无限制学习")
-        elif mode in ("target", "remain"):
-            prefix = "目标" if mode == "target" else "差额"
-            total = c_goal + o_goal
-            parts = []
-            if c_goal > 0:
-                parts.append(f"集中{c_goal:.0f}")
-            if o_goal > 0:
-                parts.append(f"网络{o_goal:.0f}")
-            self.lbl_goal_info.setText(f"{prefix}: {' + '.join(parts)} = {total:.0f}学时")
+            return
+
+        parts = []
+        if c_goal > 0:
+            mode_str = "总" if c_mode == "target" else "差额"
+            parts.append(f"集中{mode_str}{c_goal:.0f}")
+        if o_goal > 0:
+            mode_str = "总" if o_mode == "target" else "差额"
+            parts.append(f"网络{mode_str}{o_goal:.0f}")
+        self.lbl_goal_info.setText(" + ".join(parts) + "学时")
 
     async def _run_learning(self, thread: AsyncThread):
         # 重置 ETA 追踪
