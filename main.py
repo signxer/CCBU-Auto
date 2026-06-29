@@ -181,7 +181,35 @@ class CCBULearner:
         self.goal_reached = False
         self.user_data = {}
 
-    async def init(self):
+    async def init(self, log_callback=None):
+        _log = log_callback or (lambda msg, style="": console.print(msg, style=style))
+
+        # 检查 Playwright 浏览器是否已安装
+        try:
+            self.playwright = await async_playwright().start()
+            # 尝试启动一次来检测浏览器是否存在
+            test_browser = await self.playwright.chromium.launch(headless=True)
+            await test_browser.close()
+        except Exception as e:
+            if "Executable doesn't exist" in str(e) or "Browser" in str(e):
+                _log("首次运行，正在安装 Chromium 浏览器（约 200MB）...", "blue")
+                import subprocess
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        sys.executable, "-m", "playwright", "install", "chromium",
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                    )
+                    stdout, stderr = await proc.communicate()
+                    if proc.returncode == 0:
+                        _log("Chromium 安装完成", "green")
+                    else:
+                        _log(f"Chromium 安装失败: {stderr.decode()}", "red")
+                        raise RuntimeError("Chromium installation failed")
+                except FileNotFoundError:
+                    subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"])
+            else:
+                raise
+
         # 清理Playwright残留的chromium进程（不影响用户自己的浏览器）
         _kill_playwright_chrome()
 

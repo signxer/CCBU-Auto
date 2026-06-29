@@ -931,7 +931,7 @@ class DashboardScreen(QWidget):
         try:
             log("正在初始化浏览器...")
             learner = CCBULearner(headless=cfg_headless, workers=cfg_workers)
-            await learner.init()
+            await learner.init(log_callback=log)
             log("浏览器初始化完成", "green")
 
             log("正在登录...")
