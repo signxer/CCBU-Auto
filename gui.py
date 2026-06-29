@@ -126,7 +126,7 @@ class ConfigScreen(QWidget):
         h_layout.setSpacing(12)
 
         self.switch_headless = SwitchButton()
-        self.switch_headless.setChecked(self._saved.get("headless", False))
+        self.switch_headless.setChecked(self._saved.get("headless", True))
         self.switch_headless.setOnText("后台运行")
         self.switch_headless.setOffText("显示浏览器")
         h_label = BodyLabel("无头模式下浏览器不显示界面，适合后台挂机")
@@ -1671,7 +1671,7 @@ class MainWindow(_BaseWindow):
 
         # Config state
         self.cfg_workers = 1
-        self.cfg_headless = False
+        self.cfg_headless = True
         self.cfg_username = ""
         self.cfg_password = ""
         self.cfg_auto_login = True
@@ -1737,7 +1737,7 @@ class MainWindow(_BaseWindow):
             if "workers" not in cfg:
                 return False
             self.cfg_workers = cfg.get("workers", 1)
-            self.cfg_headless = cfg.get("headless", False)
+            self.cfg_headless = cfg.get("headless", True)
             self.cfg_central_goal = cfg.get("central_goal", 0)
             self.cfg_online_goal = cfg.get("online_goal", 0)
             self.cfg_central_mode = cfg.get("central_mode", "target")
