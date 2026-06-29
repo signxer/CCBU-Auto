@@ -185,17 +185,10 @@ class CCBULearner:
     async def init(self, log_callback=None, chrome_path=""):
         _log = log_callback or (lambda msg, style="": console.print(msg, style=style))
 
-        # PyInstaller 打包后，Playwright 内嵌的驱动会损坏
-        # 需要指向系统安装的 Playwright 浏览器目录
+        # PyInstaller 打包后，设置 PLAYWRIGHT_BROWSERS_PATH=0 让 Playwright
+        # 在可执行文件同目录下查找浏览器（打包时已用此变量安装浏览器到本地）
         if getattr(sys, 'frozen', False):
-            import platform as _plat
-            if _plat.system() == "Darwin":
-                _browser_cache = os.path.expanduser("~/Library/Caches/ms-playwright")
-            elif _plat.system() == "Windows":
-                _browser_cache = os.path.join(os.environ.get("LOCALAPPDATA", ""), "ms-playwright")
-            else:
-                _browser_cache = os.path.expanduser("~/.cache/ms-playwright")
-            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = _browser_cache
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
 
         # 启动 Playwright
         try:
