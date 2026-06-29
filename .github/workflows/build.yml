@@ -24,10 +24,10 @@ jobs:
           pip install pyinstaller
 
       - name: Build CLI EXE
-        run: pyinstaller -F --icon=icon.ico --name=CCBU-Auto main.py
+        run: pyinstaller -F --icon=icon.ico --add-data="icon.png;." --name=CCBU-Auto main.py
 
       - name: Build GUI EXE
-        run: pyinstaller -F -w --icon=icon.ico --name=CCBU-Auto-GUI gui.py
+        run: pyinstaller -F -w --icon=icon.ico --add-data="icon.png;." --name=CCBU-Auto-GUI gui.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
