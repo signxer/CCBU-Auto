@@ -78,13 +78,44 @@ jobs:
           iconutil -c icns icon.iconset -o icon.icns
           rm -rf icon.iconset
 
-      - name: Build GUI .app
-        run: pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --collect-all playwright --name="CCBU-Auto" gui.py
+      - name: Create macOS bundle
+        run: |
+          mkdir -p "CCBU-Auto.app/Contents/MacOS"
+          mkdir -p "CCBU-Auto.app/Contents/Resources"
+
+          # 复制源码
+          cp gui.py main.py requirements.txt 启动器.py icon.png "CCBU-Auto.app/Contents/Resources/"
+
+          # 创建启动脚本
+          cat > "CCBU-Auto.app/Contents/MacOS/CCBU-Auto" << 'LAUNCHER'
+          #!/bin/bash
+          cd "$(dirname "$0")/../Resources"
+          python3 启动器.py
+          LAUNCHER
+          chmod +x "CCBU-Auto.app/Contents/MacOS/CCBU-Auto"
+
+          # Info.plist
+          cat > "CCBU-Auto.app/Contents/Info.plist" << 'PLIST'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>CCBU-Auto</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundleName</key><string>CCBU-Auto</string>
+            <key>CFBundleIdentifier</key><string>com.ccbu.auto</string>
+            <key>CFBundleVersion</key><string>1.0</string>
+          </dict>
+          </plist>
+          PLIST
+
+          # 复制图标
+          cp icon.png "CCBU-Auto.app/Contents/Resources/icon.png"
 
       - name: Create DMG
         run: |
           mkdir -p dmg-dist
-          cp -r "dist/CCBU-Auto.app" dmg-dist/
+          cp -r "CCBU-Auto.app" dmg-dist/
           ln -sf /Applications dmg-dist/Applications
           hdiutil create -volname "CCBU-Auto" \
             -srcfolder dmg-dist \
@@ -96,6 +127,8 @@ jobs:
         with:
           name: macos
           path: dist/*.dmg
+
+  # ── Release ──
 
   # ── Release ──
   release:
