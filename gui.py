@@ -296,14 +296,24 @@ class GoalScreen(QWidget):
         self._build_ui()
 
     def _load_goal(self):
-        self._saved_goal = 0
-        self._saved_type = "central"
+        self._saved_mode = "none"
+        self._saved_central = 0
+        self._saved_online = 0
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-                self._saved_goal = cfg.get("study_goal", 0)
-                self._saved_type = cfg.get("goal_type", "central")
+                self._saved_mode = cfg.get("goal_mode", "none")
+                self._saved_central = cfg.get("central_goal", 0)
+                self._saved_online = cfg.get("online_goal", 0)
+                # 向后兼容旧格式
+                if self._saved_mode == "none" and cfg.get("study_goal", 0) > 0:
+                    self._saved_mode = "target"
+                    old_goal = cfg["study_goal"]
+                    if cfg.get("goal_type") == "central":
+                        self._saved_central = old_goal
+                    else:
+                        self._saved_online = old_goal
             except:
                 pass
 
@@ -316,64 +326,90 @@ class GoalScreen(QWidget):
         title = TitleLabel("学习目标")
         layout.addWidget(title)
 
-        subtitle = BodyLabel("设置本次学习的目标学时（可跳过）")
+        subtitle = BodyLabel("设定学习目标，程序按「集中培训→网络自学」顺序完成")
         subtitle.setForegroundRole(self.palette().PlaceholderText)
         layout.addWidget(subtitle)
 
         layout.addSpacing(10)
 
-        # Goal type card
-        type_card = HeaderCardWidget(self)
-        type_card.setTitle("目标类型")
-        type_card.setBorderRadius(8)
-        t_layout = QHBoxLayout()
-        t_layout.setSpacing(20)
-        t_layout.setContentsMargins(0, 8, 0, 8)
+        # 目标模式卡片
+        mode_card = HeaderCardWidget(self)
+        mode_card.setTitle("学习模式")
+        mode_card.setBorderRadius(8)
+        m_layout = QVBoxLayout()
+        m_layout.setSpacing(8)
+        m_layout.setContentsMargins(0, 8, 0, 8)
 
-        self.radio_central = RadioButton("集中培训")
-        self.radio_online = RadioButton("网络自学")
-        if self._saved_type == "central":
-            self.radio_central.setChecked(True)
-        else:
-            self.radio_online.setChecked(True)
-        t_layout.addWidget(self.radio_central)
-        t_layout.addWidget(self.radio_online)
-        t_layout.addStretch()
-        type_card.viewLayout.addLayout(t_layout)
-        layout.addWidget(type_card)
+        self.radio_none = RadioButton("不学习")
+        self.radio_unlimited = RadioButton("无限制学习")
+        self.radio_target = RadioButton("目标总学时")
+        self.radio_remain = RadioButton("差额补修")
 
-        # Hours card
-        hours_card = HeaderCardWidget(self)
-        hours_card.setTitle("目标学时")
-        hours_card.setBorderRadius(8)
-        h_layout = QHBoxLayout()
-        h_layout.setSpacing(12)
-        h_layout.setContentsMargins(0, 8, 0, 8)
+        mode_map = {"none": self.radio_none, "unlimited": self.radio_unlimited,
+                    "target": self.radio_target, "remain": self.radio_remain}
+        mode_map.get(self._saved_mode, self.radio_none).setChecked(True)
 
-        self.spin_hours = SpinBox()
-        self.spin_hours.setRange(0, 9999)
-        self.spin_hours.setValue(int(self._saved_goal))
-        self.spin_hours.setSpecialValueText("不限制")
-        self.spin_hours.setFixedWidth(200)
-        h_label = BodyLabel("设为 0 表示不限制学时")
-        h_label.setForegroundRole(self.palette().PlaceholderText)
-        h_layout.addWidget(self.spin_hours)
-        h_layout.addWidget(h_label)
-        h_layout.addStretch()
-        hours_card.viewLayout.addLayout(h_layout)
-        layout.addWidget(hours_card)
+        for rb in [self.radio_none, self.radio_unlimited, self.radio_target, self.radio_remain]:
+            m_layout.addWidget(rb)
+        mode_card.viewLayout.addLayout(m_layout)
+        layout.addWidget(mode_card)
+
+        # 双目标输入卡片
+        self.goal_card = HeaderCardWidget(self)
+        self.goal_card.setTitle("目标学时")
+        self.goal_card.setBorderRadius(8)
+        g_layout = QVBoxLayout()
+        g_layout.setSpacing(12)
+        g_layout.setContentsMargins(0, 8, 0, 8)
+
+        # 当前学时（登录后才会更新）
+        self.lbl_cur_hours = CaptionLabel("")
+        self.lbl_cur_hours.setStyleSheet("color: #888;")
+        g_layout.addWidget(self.lbl_cur_hours)
+
+        # 集中培训
+        row_c = QHBoxLayout()
+        row_c.addWidget(BodyLabel("集中培训:"))
+        self.spin_central = SpinBox()
+        self.spin_central.setRange(0, 9999)
+        self.spin_central.setValue(int(self._saved_central))
+        self.spin_central.setFixedWidth(150)
+        row_c.addWidget(self.spin_central)
+        row_c.addWidget(BodyLabel("学时"))
+        row_c.addStretch()
+        g_layout.addLayout(row_c)
+
+        # 网络自学
+        row_o = QHBoxLayout()
+        row_o.addWidget(BodyLabel("网络自学:"))
+        self.spin_online = SpinBox()
+        self.spin_online.setRange(0, 9999)
+        self.spin_online.setValue(int(self._saved_online))
+        self.spin_online.setFixedWidth(150)
+        row_o.addWidget(self.spin_online)
+        row_o.addWidget(BodyLabel("学时"))
+        row_o.addStretch()
+        g_layout.addLayout(row_o)
+
+        self.lbl_hint = CaptionLabel("")
+        self.lbl_hint.setStyleSheet("color: #888;")
+        g_layout.addWidget(self.lbl_hint)
+
+        self.goal_card.viewLayout.addLayout(g_layout)
+        layout.addWidget(self.goal_card)
+
+        # 模式切换时显隐目标卡片 + 更新提示
+        for rb in [self.radio_none, self.radio_unlimited, self.radio_target, self.radio_remain]:
+            rb.toggled.connect(self._on_mode_changed)
+        self.spin_central.valueChanged.connect(self._update_hint)
+        self.spin_online.valueChanged.connect(self._update_hint)
+        self._on_mode_changed()
 
         layout.addStretch()
 
-        # Buttons
+        # 按钮
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
-
-        btn_skip = PushButton("  跳过")
-        btn_skip.setIcon(FIF.CLOSE)
-        btn_skip.setFixedSize(120, 40)
-        btn_skip.clicked.connect(lambda: self._on_done(0, "central"))
-        btn_layout.addWidget(btn_skip)
 
         btn_next = PrimaryPushButton("  继续")
         btn_next.setIcon(FIF.RIGHT_ARROW)
@@ -383,26 +419,64 @@ class GoalScreen(QWidget):
 
         layout.addLayout(btn_layout)
 
-    def _on_next(self):
-        goal_type = "central" if self.radio_central.isChecked() else "online"
-        hours = self.spin_hours.value()
-        self._on_done(hours, goal_type)
+    def _on_mode_changed(self):
+        show_goals = self.radio_target.isChecked() or self.radio_remain.isChecked()
+        self.goal_card.setVisible(show_goals)
+        self._update_hint()
 
-    def _on_done(self, hours, goal_type):
+    def _update_hint(self):
+        if self.radio_none.isChecked():
+            self.lbl_hint.setText("")
+        elif self.radio_unlimited.isChecked():
+            self.lbl_hint.setText("")
+        elif self.radio_target.isChecked():
+            c = self.spin_central.value()
+            o = self.spin_online.value()
+            if c > 0 or o > 0:
+                self.lbl_hint.setText(f"目标: 集中{c} + 网络{o} = 共{c+o}学时")
+            else:
+                self.lbl_hint.setText("至少设定一个目标学时")
+        elif self.radio_remain.isChecked():
+            c = self.spin_central.value()
+            o = self.spin_online.value()
+            if c > 0 or o > 0:
+                self.lbl_hint.setText(f"还需补充: 集中{c} + 网络{o} = 共{c+o}学时")
+            else:
+                self.lbl_hint.setText("至少设定一个差额学时")
+
+    def _on_next(self):
+        if self.radio_none.isChecked():
+            mode = "none"
+        elif self.radio_unlimited.isChecked():
+            mode = "unlimited"
+        elif self.radio_target.isChecked():
+            mode = "target"
+        else:
+            mode = "remain"
+        central = self.spin_central.value()
+        online = self.spin_online.value()
+        self._on_done(mode, central, online)
+
+    def _on_done(self, goal_mode, central_goal, online_goal):
         try:
             cfg = {}
             if os.path.exists(CONFIG_PATH):
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
-            cfg["study_goal"] = hours
-            cfg["goal_type"] = goal_type
+            cfg["goal_mode"] = goal_mode
+            cfg["central_goal"] = central_goal
+            cfg["online_goal"] = online_goal
+            # 清理旧字段
+            cfg.pop("study_goal", None)
+            cfg.pop("goal_type", None)
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
         except:
             pass
         win = self.window()
-        win.cfg_goal_type = goal_type
-        win.cfg_goal_hours = hours
+        win.cfg_goal_mode = goal_mode
+        win.cfg_central_goal = central_goal
+        win.cfg_online_goal = online_goal
         win.next_screen()
 
 
@@ -771,13 +845,22 @@ class DashboardScreen(QWidget):
             self.table.setItem(i, 3, QTableWidgetItem("等待中"))
 
     def _set_goal_info(self, win):
-        goal_type = getattr(win, "cfg_goal_type", "central")
-        goal_hours = getattr(win, "cfg_goal_hours", 0)
-        type_name = "集中培训" if goal_type == "central" else "网络自学"
-        if goal_hours > 0:
-            self.lbl_goal_info.setText(f"{type_name} {goal_hours:.0f} 学时")
-        else:
-            self.lbl_goal_info.setText("不限制")
+        mode = getattr(win, "cfg_goal_mode", "none")
+        c_goal = getattr(win, "cfg_central_goal", 0)
+        o_goal = getattr(win, "cfg_online_goal", 0)
+        if mode == "none":
+            self.lbl_goal_info.setText("不学习")
+        elif mode == "unlimited":
+            self.lbl_goal_info.setText("无限制学习")
+        elif mode in ("target", "remain"):
+            prefix = "目标" if mode == "target" else "差额"
+            total = c_goal + o_goal
+            parts = []
+            if c_goal > 0:
+                parts.append(f"集中{c_goal:.0f}")
+            if o_goal > 0:
+                parts.append(f"网络{o_goal:.0f}")
+            self.lbl_goal_info.setText(f"{prefix}: {' + '.join(parts)} = {total:.0f}学时")
 
     async def _run_learning(self, thread: AsyncThread):
         # 重置 ETA 追踪
@@ -825,22 +908,49 @@ class DashboardScreen(QWidget):
                 return
             log("登录成功", "green")
 
-            # 登录后立即检查学时，已完成则直接退出
-            if cfg_goal_hours > 0:
+            # 获取配置
+            cfg_goal_mode = getattr(win, "cfg_goal_mode", "none")
+            cfg_central_goal = getattr(win, "cfg_central_goal", 0)
+            cfg_online_goal = getattr(win, "cfg_online_goal", 0)
+
+            if cfg_goal_mode == "none":
+                log("未设定学习目标，退出", "yellow")
+                thread.done_signal.emit(0, 0)
+                return
+
+            # 登录后立即检查学时
+            cur_hours = {"central": 0, "online": 0}
+            if cfg_goal_mode in ("target", "remain"):
                 log("正在检查当前学时...", "blue")
                 try:
                     _h = await learner._get_study_hours(learner.pages[0])
-                    _cur = _h.get(cfg_goal_type, 0)
-                    type_name = "集中培训" if cfg_goal_type == "central" else "网络自学"
-                    log(f"当前{type_name}: {_cur:.1f}/{cfg_goal_hours:.0f} 学时", "blue")
-                    # 推送学时到GUI
+                    cur_hours = {"central": _h.get("central", 0), "online": _h.get("online", 0)}
+                    log(f"当前: 集中{cur_hours['central']:.1f} 网络{cur_hours['online']:.1f} 学时", "blue")
                     hours_cb(_h)
-                    if _cur >= cfg_goal_hours:
-                        log(f"已达到学习目标 ({_cur:.1f} ≥ {cfg_goal_hours:.0f})，无需学习", "bold green")
+
+                    # target模式：计算实际差额
+                    if cfg_goal_mode == "target":
+                        cfg_central_goal = max(0, cfg_central_goal - cur_hours["central"])
+                        cfg_online_goal = max(0, cfg_online_goal - cur_hours["online"])
+
+                    # 检查是否都已完成
+                    if cfg_central_goal <= 0 and cfg_online_goal <= 0:
+                        log(f"已达到全部学习目标，无需学习", "bold green")
                         thread.done_signal.emit(0, 0)
                         return
                 except Exception as e:
                     log(f"学时检查失败(继续学习): {e}", "yellow")
+
+            # 构建阶段列表：先集中培训，再网络自学
+            phases = []
+            if cfg_goal_mode == "unlimited":
+                phases.append(("central", 0))  # 0表示不限制
+                phases.append(("online", 0))
+            else:
+                if cfg_central_goal > 0:
+                    phases.append(("central", cfg_central_goal))
+                if cfg_online_goal > 0:
+                    phases.append(("online", cfg_online_goal))
 
             # 手动模式：直接从指定URL学习
             if cfg_mode == "manual":
@@ -852,10 +962,7 @@ class DashboardScreen(QWidget):
                 thread.done_signal.emit(0, 0)
                 return
 
-            # 自动模式
-            learner.study_goal = cfg_goal_hours
-            learner.goal_type = cfg_goal_type
-
+            # ── 自动模式：按阶段顺序学习 ──
             page = learner.pages[0]
             list_url = "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise"
 
@@ -951,101 +1058,116 @@ class DashboardScreen(QWidget):
                 else:
                     log("从第 1 页开始", "blue")
 
-            no_more_pages = False
-            tasks = []
-            ws_locks = {}
-
-            # 采集第一页后立即开始学习，不等所有课程收集完
-            first_page_collected = False
-            while not first_page_collected:
-                workshops = await learner.get_workshops(page)
-                if not workshops:
-                    no_more_pages = True
-                    break
-                log(f"第 {page_num} 页: {len(workshops)} 个专题班", "blue")
-                learner.save_progress(completed_ids, page_num, 0)
-                new_tasks, new_locks = await learner._collect_workshops_courses(
-                    page, workshops, completed_ids, log_callback=log
-                )
-                tasks.extend(new_tasks)
-                ws_locks.update(new_locks)
-                if tasks:
-                    # 有课程了，立即开始学习
-                    first_page_collected = True
-                    break
-                # 当前页没有课程，翻页继续
-                log("当前页无可用课程，翻页继续...", "yellow")
-                moved = await learner.go_to_next_page(page)
-                if not moved:
-                    no_more_pages = True
+            # ── 按阶段顺序学习（先集中培训，再网络自学）──
+            for phase_goal_type, phase_goal_hours in phases:
+                type_name = "集中培训" if phase_goal_type == "central" else "网络自学"
+                if phase_goal_hours > 0:
+                    log(f"━━ 阶段: {type_name} 目标{phase_goal_hours:.0f}学时 ━━", "bold blue")
                 else:
-                    page_num += 1
-                    await page.wait_for_timeout(3000)
+                    log(f"━━ 阶段: {type_name} 无限制 ━━", "bold blue")
 
-            if tasks:
-                log(f"开始学习（{len(tasks)} 门课程, {cfg_workers} 个线程）", "bold blue")
-                _fetch_lock = asyncio.Lock()
-                # 创建独立页面用于采集（不与学习worker冲突）
-                _collect_page = await learner.context.new_page()
+                # 重置ETA追踪
+                self._learn_start_time = None
+                self._progress_history = []
+                self._eta_seconds = None
+                self._eta_calc_time = None
 
-                _fetched_page = 0  # 已采集到的页码，防重复采集
+                learner.study_goal = phase_goal_hours
+                learner.goal_type = phase_goal_type
 
-                async def fetch_more_courses(queue):
-                    nonlocal _fetched_page
-                    if no_more_pages:
-                        return 0
-                    async with _fetch_lock:
+                no_more_pages = False
+                tasks = []
+                ws_locks = {}
+
+                # 采集第一页后立即开始学习
+                first_page_collected = False
+                while not first_page_collected:
+                    workshops = await learner.get_workshops(page)
+                    if not workshops:
+                        no_more_pages = True
+                        break
+                    log(f"第 {page_num} 页: {len(workshops)} 个专题班", "blue")
+                    learner.save_progress(completed_ids, page_num, 0)
+                    new_tasks, new_locks = await learner._collect_workshops_courses(
+                        page, workshops, completed_ids, log_callback=log
+                    )
+                    tasks.extend(new_tasks)
+                    ws_locks.update(new_locks)
+                    if tasks:
+                        first_page_collected = True
+                        break
+                    log("当前页无可用课程，翻页继续...", "yellow")
+                    moved = await learner.go_to_next_page(page)
+                    if not moved:
+                        no_more_pages = True
+                    else:
+                        page_num += 1
+                        await page.wait_for_timeout(3000)
+
+                if tasks:
+                    log(f"开始学习（{len(tasks)} 门课程, {cfg_workers} 个线程）", "bold blue")
+                    _fetch_lock = asyncio.Lock()
+                    _collect_page = await learner.context.new_page()
+
+                    _fetched_page = 0
+
+                    async def fetch_more_courses(queue):
+                        nonlocal _fetched_page
                         if no_more_pages:
                             return 0
-                        # 队列已有课程（其他worker已采集过），不重复采集
-                        if queue.qsize() > 0:
-                            return 0
-                        if cfg_goal_hours > 0:
+                        async with _fetch_lock:
+                            if no_more_pages:
+                                return 0
+                            if queue.qsize() > 0:
+                                return 0
+                            # 检查当前阶段目标是否已达成
+                            if phase_goal_hours > 0:
+                                try:
+                                    _h = await learner._get_study_hours(page)
+                                    if _h.get(phase_goal_type, 0) >= phase_goal_hours:
+                                        log(f"✓ {type_name}目标已达成!", "bold green")
+                                        return 0
+                                except:
+                                    pass
                             try:
-                                _h = await learner._get_study_hours(page)
-                                if _h.get(cfg_goal_type, 0) >= cfg_goal_hours:
-                                    log("已达到学习目标!", "bold green")
-                                    return 0
+                                await _collect_page.goto(
+                                    "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
+                                    wait_until="domcontentloaded", timeout=20000)
+                                await _collect_page.wait_for_timeout(8000)
                             except:
                                 pass
-                        # 用独立页面导航到列表页
-                        try:
-                            await _collect_page.goto(
-                                "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
-                                wait_until="domcontentloaded", timeout=20000)
-                            await _collect_page.wait_for_timeout(8000)
-                        except:
-                            pass
-                        moved = await learner.go_to_next_page(_collect_page)
-                        if not moved:
-                            no_more_pages = True
-                            return 0
-                        nonlocal page_num
-                        page_num += 1
-                        _fetched_page = page_num
-                        await _collect_page.wait_for_timeout(5000)
-                        new_ws = await learner.get_workshops(_collect_page)
-                        if not new_ws:
-                            no_more_pages = True
-                            return 0
-                        log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
-                        learner.save_progress(completed_ids, page_num, 0)
-                        new_t, new_l = await learner._collect_workshops_courses(
-                            _collect_page, new_ws, completed_ids, log_callback=log
-                        )
-                        ws_locks.update(new_l)
-                        for t in new_t:
-                            queue.put_nowait((*t, 0))
-                        if new_t:
-                            log(f"新增 {len(new_t)} 门课程", "green")
-                        return len(new_t)
+                            moved = await learner.go_to_next_page(_collect_page)
+                            if not moved:
+                                no_more_pages = True
+                                return 0
+                            nonlocal page_num
+                            page_num += 1
+                            _fetched_page = page_num
+                            await _collect_page.wait_for_timeout(5000)
+                            new_ws = await learner.get_workshops(_collect_page)
+                            if not new_ws:
+                                no_more_pages = True
+                                return 0
+                            log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
+                            learner.save_progress(completed_ids, page_num, 0)
+                            new_t, new_l = await learner._collect_workshops_courses(
+                                _collect_page, new_ws, completed_ids, log_callback=log
+                            )
+                            ws_locks.update(new_l)
+                            for t in new_t:
+                                queue.put_nowait((*t, 0))
+                            if new_t:
+                                log(f"新增 {len(new_t)} 门课程", "green")
+                            return len(new_t)
 
-                await learner.parallel_learn_courses(
-                    tasks, ws_locks, fetch_more_courses, progress_cb, hours_cb, log
-                )
-            else:
-                log("没有需要学习的课程", "yellow")
+                    await learner.parallel_learn_courses(
+                        tasks, ws_locks, fetch_more_courses, progress_cb, hours_cb, log
+                    )
+                    log(f"✓ {type_name}阶段完成", "bold green")
+                else:
+                    log(f"{type_name}: 没有需要学习的课程", "yellow")
 
+            log("全部学习目标完成!", "bold green")
             thread.done_signal.emit(0, 0)
 
         except Exception as e:
@@ -1075,39 +1197,71 @@ class DashboardScreen(QWidget):
         self.lbl_online.setText(f"网络自学: {data.get('online', 0):.1f} 学时")
         self.lbl_updated.setText(f"更新时间: {data.get('updated', '--')}")
         win = self.window()
-        goal_type = getattr(win, "cfg_goal_type", "central")
-        goal_hours = getattr(win, "cfg_goal_hours", 0)
-        if goal_hours > 0:
-            cur = data.get(goal_type, 0)
-            pct_f = min(100.0, cur / goal_hours * 100)  # 浮点精度，用于ETA计算
-            pct = int(pct_f)  # 整数，用于显示和进度环
-            self.progress_ring.setValue(pct)
-            type_name = "集中培训" if goal_type == "central" else "网络自学"
-            self.lbl_goal_info.setText(f"{type_name} {cur:.1f}/{goal_hours:.0f} 学时 ({pct}%)")
+        mode = getattr(win, "cfg_goal_mode", "none")
+        c_goal = getattr(win, "cfg_central_goal", 0)
+        o_goal = getattr(win, "cfg_online_goal", 0)
 
-            # ── ETA 计算（用浮点pct_f避免int截断导致速率失真）──
-            now = _time.time()
-            if self._learn_start_time is None:
-                self._learn_start_time = now
-            self._progress_history.append((now, pct_f))
-            # 只保留最近 20 条
-            if len(self._progress_history) > 20:
-                self._progress_history = self._progress_history[-20:]
+        if mode == "none":
+            self.progress_ring.setValue(0)
+            self.lbl_goal_info.setText("不学习")
+            return
+        if mode == "unlimited":
+            self.progress_ring.setValue(0)
+            self.lbl_goal_info.setText("无限制学习")
+            return
 
-            if pct_f >= 100:
-                self._eta_seconds = None
-                self._eta_timer.stop()
-                self.lbl_eta.setText("✓ 已完成")
+        # target / remain 模式：计算当前活跃目标的进度
+        c_cur = data.get("central", 0)
+        o_cur = data.get("online", 0)
+
+        # 确定当前阶段和目标
+        if c_goal > 0 and c_cur < c_goal:
+            # 集中培训阶段
+            goal = c_goal
+            cur = c_cur
+            label = "集中培训"
+        elif o_goal > 0 and o_cur < o_goal:
+            # 网络自学阶段
+            goal = o_goal
+            cur = o_cur
+            label = "网络自学"
+        else:
+            # 全部完成
+            self.progress_ring.setValue(100)
+            self.lbl_goal_info.setText(f"✓ 全部完成 集中{c_cur:.1f} 网络{o_cur:.1f}")
+            self._eta_seconds = None
+            self._eta_timer.stop()
+            self.lbl_eta.setText("✓ 已完成")
+            return
+
+        pct_f = min(100.0, cur / goal * 100)
+        pct = int(pct_f)
+        self.progress_ring.setValue(pct)
+        remaining = max(0, goal - cur)
+        self.lbl_goal_info.setText(f"{label} {cur:.1f}/{goal:.0f}学时 剩{remaining:.1f}")
+
+        # ── ETA 计算 ──
+        now = _time.time()
+        if self._learn_start_time is None:
+            self._learn_start_time = now
+        self._progress_history.append((now, pct_f))
+        if len(self._progress_history) > 20:
+            self._progress_history = self._progress_history[-20:]
+
+        if pct_f >= 100:
+            self._eta_seconds = None
+            self._eta_timer.stop()
+            self.lbl_eta.setText(f"✓ {label}完成")
+        else:
+            eta_sec = self._calc_eta(pct_f, now)
+            if eta_sec is not None and eta_sec > 0:
+                self._eta_seconds = eta_sec
+                self._eta_calc_time = now
+                self._update_eta_label()
+                if not self._eta_timer.isActive():
+                    self._eta_timer.start()
             else:
-                eta_sec = self._calc_eta(pct_f, now)
-                if eta_sec is not None and eta_sec > 0:
-                    self._eta_seconds = eta_sec
-                    self._eta_calc_time = now
-                    self._update_eta_label()
-                    if not self._eta_timer.isActive():
-                        self._eta_timer.start()
-                else:
-                    self.lbl_eta.setText("计算中...")
+                self.lbl_eta.setText("计算中...")
 
     def _calc_eta(self, pct_f, now):
         """计算ETA秒数，用首尾点+平滑过滤"""
@@ -1462,8 +1616,9 @@ class MainWindow(_BaseWindow):
         self.cfg_username = ""
         self.cfg_password = ""
         self.cfg_auto_login = True
-        self.cfg_goal_type = "central"
-        self.cfg_goal_hours = 0
+        self.cfg_goal_mode = "none"      # none/unlimited/target/remain
+        self.cfg_central_goal = 0.0
+        self.cfg_online_goal = 0.0
         self.cfg_tags = []
         self.cfg_mode = "auto"
         self.cfg_manual_urls = []
@@ -1513,8 +1668,16 @@ class MainWindow(_BaseWindow):
                 return False
             self.cfg_workers = cfg.get("workers", 1)
             self.cfg_headless = cfg.get("headless", False)
-            self.cfg_goal_type = cfg.get("goal_type", "central")
-            self.cfg_goal_hours = cfg.get("study_goal", 0)
+            self.cfg_goal_mode = cfg.get("goal_mode", "none")
+            self.cfg_central_goal = cfg.get("central_goal", 0)
+            self.cfg_online_goal = cfg.get("online_goal", 0)
+            # 向后兼容旧格式
+            if self.cfg_goal_mode == "none" and cfg.get("study_goal", 0) > 0:
+                self.cfg_goal_mode = "target"
+                if cfg.get("goal_type") == "central":
+                    self.cfg_central_goal = cfg["study_goal"]
+                else:
+                    self.cfg_online_goal = cfg["study_goal"]
             self.cfg_tags = cfg.get("selected_tags", [])
             # 加载账号
             creds_path = USER_CREDENTIALS_PATH
