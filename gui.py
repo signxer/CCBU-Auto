@@ -712,7 +712,7 @@ class DashboardScreen(QWidget):
         header = QHBoxLayout()
         header.setSpacing(8)
         title = StrongBodyLabel("润物细无声 CCBU-Auto")
-        title.setFont(QFont("", 18, QFont.Bold))
+        title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header.addWidget(title)
         header.addStretch()
 
@@ -1659,7 +1659,7 @@ class MainWindow(_BaseWindow):
         self._drag_pos = None
 
         # 设置窗口图标
-        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "icon.png")
+        icon_path = _get_resource_path("icon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
@@ -1824,22 +1824,47 @@ class MainWindow(_BaseWindow):
 # ─── Entry ─────────────────────────────────────────────────────────
 
 
-def main():
-    import os, platform, multiprocessing
-    multiprocessing.freeze_support()
-    # 抑制 Qt 字体警告（macOS 上 "Segoe UI" 不存在）
-    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
-    app = QApplication(sys.argv)
-    from PyQt5.QtGui import QFont
-    # 平台适配字体：macOS 用 PingFang SC，Windows 用 Microsoft YaHei，其他用系统默认
-    if platform.system() == "Darwin":
-        app.setFont(QFont("PingFang SC", 13))
-    elif platform.system() == "Windows":
-        app.setFont(QFont("Microsoft YaHei", 13))
+def _get_resource_path(filename):
+    """获取资源文件路径（兼容 PyInstaller 打包）"""
+    if getattr(sys, 'frozen', False):
+        base = sys._MEIPASS
     else:
-        app.setFont(QFont("Noto Sans CJK SC", 13))
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, filename)
+
+
+def main():
+    import platform, multiprocessing
+    multiprocessing.freeze_support()
+    # 抑制 Qt 字体警告
+    os.environ.setdefault("QT_LOGGING_RULES", "qt.qpa.fonts=false")
+    # 全局禁用 Segoe UI 等不存在的字体回退
+    os.environ["QT_FONT_DPI"] = "96"
+
+    app = QApplication(sys.argv)
+
+    # 平台适配字体
+    from PyQt5.QtGui import QFont
+    if platform.system() == "Darwin":
+        font_family = "PingFang SC"
+    elif platform.system() == "Windows":
+        font_family = "Microsoft YaHei"
+    else:
+        font_family = "Noto Sans CJK SC"
+    font = QFont(font_family, 13)
+    font.setStyleStrategy(QFont.PreferAntialias)
+    app.setFont(font)
+
+    # 全局样式覆盖字体族
+    app.setStyleSheet(f"* {{ font-family: '{font_family}'; }}")
+
     app.setStyle("Windows")
     setTheme(Theme.AUTO)
+
+    # 设置应用图标（全局生效）
+    icon_path = _get_resource_path("icon.png")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     window = MainWindow()
     window.show()
