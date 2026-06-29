@@ -377,7 +377,8 @@ class GoalScreen(QWidget):
 
         # 学时输入
         c_hours_row = QHBoxLayout()
-        c_hours_row.addWidget(BodyLabel("目标学时:"))
+        self.lbl_central_prefix = BodyLabel("目标总学时:" if self._saved_central_mode != "remain" else "差额学时:")
+        c_hours_row.addWidget(self.lbl_central_prefix)
         self.spin_central = SpinBox()
         self.spin_central.setRange(0, 9999)
         self.spin_central.setValue(int(self._saved_central))
@@ -386,6 +387,12 @@ class GoalScreen(QWidget):
         c_hours_row.addWidget(BodyLabel("学时"))
         c_hours_row.addStretch()
         central_goal_layout.addLayout(c_hours_row)
+
+        # 切换模式时更新标签
+        self.radio_central_target.toggled.connect(
+            lambda checked: self.lbl_central_prefix.setText("目标总学时:" if checked else "差额学时:"))
+        self.radio_central_remain.toggled.connect(
+            lambda checked: self.lbl_central_prefix.setText("差额学时:" if checked else "目标总学时:"))
 
         c_layout.addWidget(self.central_goal_widget)
 
@@ -430,7 +437,8 @@ class GoalScreen(QWidget):
 
         # 学时输入
         o_hours_row = QHBoxLayout()
-        o_hours_row.addWidget(BodyLabel("目标学时:"))
+        self.lbl_online_prefix = BodyLabel("目标总学时:" if self._saved_online_mode != "remain" else "差额学时:")
+        o_hours_row.addWidget(self.lbl_online_prefix)
         self.spin_online = SpinBox()
         self.spin_online.setRange(0, 9999)
         self.spin_online.setValue(int(self._saved_online))
@@ -439,6 +447,12 @@ class GoalScreen(QWidget):
         o_hours_row.addWidget(BodyLabel("学时"))
         o_hours_row.addStretch()
         online_goal_layout.addLayout(o_hours_row)
+
+        # 切换模式时更新标签
+        self.radio_online_target.toggled.connect(
+            lambda checked: self.lbl_online_prefix.setText("目标总学时:" if checked else "差额学时:"))
+        self.radio_online_remain.toggled.connect(
+            lambda checked: self.lbl_online_prefix.setText("差额学时:" if checked else "目标总学时:"))
 
         o_layout.addWidget(self.online_goal_widget)
 
