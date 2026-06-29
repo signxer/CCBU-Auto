@@ -7,7 +7,7 @@ import sys
 import threading
 from datetime import datetime
 
-from PyQt5.QtCore import Qt, QThread, pyqtSignal as Signal, QSize, QTimer
+from PyQt5.QtCore import Qt, QThread, pyqtSignal as Signal, QSize, QTimer, QEventLoop
 from PyQt5.QtGui import QColor, QFont, QIcon
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
@@ -1651,6 +1651,10 @@ class MainWindow(_BaseWindow):
 
     def _createSubInterfaces(self):
         """创建所有子界面"""
+        # 让启动画面显示一下（用事件循环避免阻塞UI）
+        loop = QEventLoop(self)
+        QTimer.singleShot(1500, loop.quit)
+        loop.exec()
         self.screen_config = ConfigScreen(self)
         self.screen_config.setObjectName("config")
         self.screen_login = LoginScreen(self)
