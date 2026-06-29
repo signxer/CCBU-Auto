@@ -83,9 +83,37 @@ jobs:
           mkdir -p CCBU-Auto.app/Contents/MacOS
           mkdir -p CCBU-Auto.app/Contents/Resources
           cp gui.py main.py requirements.txt 启动器.py icon.png CCBU-Auto.app/Contents/Resources/
-          printf '#!/bin/bash\ncd "$(dirname "$0")/../Resources"\npython3 启动器.py\n' > CCBU-Auto.app/Contents/MacOS/CCBU-Auto
+
+          # 启动脚本：用 open -a Terminal 在终端中运行，用户能看到输出和错误
+          cat > CCBU-Auto.app/Contents/MacOS/CCBU-Auto << 'EOF'
+          #!/bin/bash
+          DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
+          open -a Terminal "$DIR/启动器.py"
+          EOF
           chmod +x CCBU-Auto.app/Contents/MacOS/CCBU-Auto
-          printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n<key>CFBundleExecutable</key><string>CCBU-Auto</string>\n<key>CFBundleIconFile</key><string>icon</string>\n<key>CFBundleName</key><string>CCBU-Auto</string>\n<key>CFBundleIdentifier</key><string>com.ccbu.auto</string>\n<key>CFBundleVersion</key><string>1.0</string>\n</dict>\n</plist>\n' > CCBU-Auto.app/Contents/Info.plist
+
+          # 同时放一个可双击的 .command 文件
+          cat > CCBU-Auto.app/Contents/Resources/start.command << 'EOF'
+          #!/bin/bash
+          cd "$(dirname "$0")"
+          python3 启动器.py
+          read -p "按回车关闭..."
+          EOF
+          chmod +x CCBU-Auto.app/Contents/Resources/start.command
+
+          cat > CCBU-Auto.app/Contents/Info.plist << 'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>CFBundleExecutable</key><string>CCBU-Auto</string>
+            <key>CFBundleIconFile</key><string>icon</string>
+            <key>CFBundleName</key><string>CCBU-Auto</string>
+            <key>CFBundleIdentifier</key><string>com.ccbu.auto</string>
+            <key>CFBundleVersion</key><string>1.0</string>
+          </dict>
+          </plist>
+          EOF
 
       - name: Create DMG
         run: |
