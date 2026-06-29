@@ -1660,12 +1660,12 @@ class MainWindow(_BaseWindow):
 
         # 设置窗口图标
         icon_path = _get_resource_path("icon.png")
-        if os.path.exists(icon_path):
-            self.setWindowIcon(QIcon(icon_path))
+        app_icon = QIcon(icon_path) if os.path.exists(icon_path) else QIcon()
+        self.setWindowIcon(app_icon)
 
         # 创建启动画面
         from qfluentwidgets import SplashScreen
-        self.splashScreen = SplashScreen(self.windowIcon(), self)
+        self.splashScreen = SplashScreen(app_icon, self)
         self.splashScreen.setIconSize(QSize(128, 128))
         self.show()
 
