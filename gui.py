@@ -137,6 +137,26 @@ class ConfigScreen(QWidget):
         headless_card.viewLayout.addLayout(h_layout)
         layout.addWidget(headless_card)
 
+        # Browser engine card
+        browser_card = HeaderCardWidget(self)
+        browser_card.setTitle("浏览器引擎")
+        browser_card.setBorderRadius(8)
+        b_layout = QHBoxLayout()
+        b_layout.setSpacing(12)
+
+        self.radio_chrome = RadioButton("本地 Chrome")
+        self.radio_chromium = RadioButton("内置 Chromium")
+        saved_browser = self._saved.get("browser", "chromium")
+        if saved_browser == "chrome":
+            self.radio_chrome.setChecked(True)
+        else:
+            self.radio_chromium.setChecked(True)
+        b_layout.addWidget(self.radio_chrome)
+        b_layout.addWidget(self.radio_chromium)
+        b_layout.addStretch()
+        browser_card.viewLayout.addLayout(b_layout)
+        layout.addWidget(browser_card)
+
         layout.addStretch()
 
         # Start button
@@ -153,6 +173,7 @@ class ConfigScreen(QWidget):
     def _on_start(self):
         workers = self.spin_workers.value()
         headless = self.switch_headless.isChecked()
+        browser = "chrome" if self.radio_chrome.isChecked() else "chromium"
         try:
             cfg = {}
             if os.path.exists(CONFIG_PATH):
@@ -160,6 +181,7 @@ class ConfigScreen(QWidget):
                     cfg = json.load(f)
             cfg["workers"] = workers
             cfg["headless"] = headless
+            cfg["browser"] = browser
             with open(CONFIG_PATH, "w", encoding="utf-8") as f:
                 json.dump(cfg, f, ensure_ascii=False, indent=2)
         except:
@@ -167,6 +189,7 @@ class ConfigScreen(QWidget):
         win = self.window()
         win.cfg_workers = workers
         win.cfg_headless = headless
+        win.cfg_browser = browser
         win.next_screen()
 
 
@@ -929,8 +952,9 @@ class DashboardScreen(QWidget):
         hours_cb = lambda data: thread.hours_signal.emit(data)
 
         try:
+            cfg_browser = getattr(win, "cfg_browser", "chromium")
             log("正在初始化浏览器...")
-            learner = CCBULearner(headless=cfg_headless, workers=cfg_workers)
+            learner = CCBULearner(headless=cfg_headless, workers=cfg_workers, browser=cfg_browser)
             await learner.init(log_callback=log)
             log("浏览器初始化完成", "green")
 
@@ -1672,6 +1696,7 @@ class MainWindow(_BaseWindow):
         # Config state
         self.cfg_workers = 1
         self.cfg_headless = True
+        self.cfg_browser = "chromium"  # chromium/chrome
         self.cfg_username = ""
         self.cfg_password = ""
         self.cfg_auto_login = True
@@ -1738,6 +1763,7 @@ class MainWindow(_BaseWindow):
                 return False
             self.cfg_workers = cfg.get("workers", 1)
             self.cfg_headless = cfg.get("headless", True)
+            self.cfg_browser = cfg.get("browser", "chromium")
             self.cfg_central_goal = cfg.get("central_goal", 0)
             self.cfg_online_goal = cfg.get("online_goal", 0)
             self.cfg_central_mode = cfg.get("central_mode", "target")

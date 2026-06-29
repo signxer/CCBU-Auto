@@ -166,9 +166,10 @@ async def async_input(prompt: str, default: str = "y", timeout: int = 5,
 
 
 class CCBULearner:
-    def __init__(self, headless: bool = False, workers: int = 1):
+    def __init__(self, headless: bool = False, workers: int = 1, browser: str = "chromium"):
         self.headless = headless
         self.workers = workers
+        self.browser_type = browser  # "chromium" or "chrome"
         self.playwright = None
         self.browser = None
         self.context = None
@@ -214,39 +215,43 @@ class CCBULearner:
         _kill_playwright_chrome()
 
         self.playwright = await async_playwright().start()
-        # 优先使用系统Chrome，找不到再用内置Chromium
         import sys
         launch_opts = {"headless": self.headless}
         use_system_chrome = False
 
-        if sys.platform == "win32":
-            # Windows: 检查常见Chrome安装路径
-            chrome_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
-            ]
-            for path in chrome_paths:
-                if os.path.exists(path):
-                    launch_opts["channel"] = "chrome"
-                    use_system_chrome = True
-                    console.print(f"使用系统Chrome", style="green")
-                    break
+        if self.browser_type == "chrome":
+            # 用户选择使用系统 Chrome
+            if sys.platform == "win32":
+                chrome_paths = [
+                    r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                    r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                    os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                ]
+                for path in chrome_paths:
+                    if os.path.exists(path):
+                        launch_opts["channel"] = "chrome"
+                        use_system_chrome = True
+                        _log("使用系统 Chrome", "green")
+                        break
+                if not use_system_chrome:
+                    try:
+                        subprocess.run(["where", "chrome"], check=True, capture_output=True, timeout=3)
+                        launch_opts["channel"] = "chrome"
+                        use_system_chrome = True
+                        _log("使用系统 Chrome (PATH)", "green")
+                    except:
+                        pass
+            else:
+                # macOS/Linux
+                launch_opts["channel"] = "chrome"
+                use_system_chrome = True
+                _log("使用系统 Chrome", "green")
+
             if not use_system_chrome:
-                try:
-                    import subprocess
-                    subprocess.run(["where", "chrome"], check=True, capture_output=True, timeout=3)
-                    launch_opts["channel"] = "chrome"
-                    use_system_chrome = True
-                    console.print("使用系统Chrome (PATH)", style="green")
-                except:
-                    pass
-        else:
-            # macOS/Linux: 默认使用内置Chromium，不检测系统Chrome
-            pass
+                _log("未找到系统 Chrome，改用内置 Chromium", "yellow")
 
         if not use_system_chrome:
-            console.print("使用内置Chromium", style="yellow")
+            _log("使用内置 Chromium", "yellow")
 
         try:
             self.browser = await self.playwright.chromium.launch(**launch_opts)
