@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import platform
 import sys
 import threading
 from datetime import datetime
@@ -142,7 +143,6 @@ class ConfigScreen(QWidget):
         card_layout.addLayout(row1)
 
         # Row 2: Browser engine
-        import platform
         default_browser = "chrome" if platform.system() == "Windows" else "chromium"
         saved_browser = self._saved.get("browser", default_browser)
 
