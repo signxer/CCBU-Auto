@@ -1201,6 +1201,10 @@ class DashboardScreen(QWidget):
             thread.done_signal.emit(0, 0)
 
         except Exception as e:
+            # 页面/浏览器被关闭时静默处理（用户打开设置页面等场景）
+            if "Target page, context or browser has been closed" in str(e):
+                thread.done_signal.emit(0, 0)
+                return
             log(f"错误: {e}", "red")
             import traceback
             log(traceback.format_exc(), "red")
