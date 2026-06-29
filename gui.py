@@ -300,12 +300,16 @@ class GoalScreen(QWidget):
         self._saved_online = 0
         self._saved_central_on = False
         self._saved_online_on = False
+        self._saved_central_mode = "target"  # target/remain
+        self._saved_online_mode = "target"
         if os.path.exists(CONFIG_PATH):
             try:
                 with open(CONFIG_PATH, "r", encoding="utf-8") as f:
                     cfg = json.load(f)
                 self._saved_central = cfg.get("central_goal", 0)
                 self._saved_online = cfg.get("online_goal", 0)
+                self._saved_central_mode = cfg.get("central_mode", "target")
+                self._saved_online_mode = cfg.get("online_mode", "target")
                 self._saved_central_on = self._saved_central > 0
                 self._saved_online_on = self._saved_online > 0
                 # 向后兼容旧格式
@@ -354,16 +358,35 @@ class GoalScreen(QWidget):
         c_layout.addLayout(c_switch_row)
 
         self.central_goal_widget = QWidget()
-        central_goal_row = QHBoxLayout(self.central_goal_widget)
-        central_goal_row.setContentsMargins(0, 0, 0, 0)
-        central_goal_row.addWidget(BodyLabel("目标学时:"))
+        central_goal_layout = QVBoxLayout(self.central_goal_widget)
+        central_goal_layout.setContentsMargins(0, 0, 0, 0)
+        central_goal_layout.setSpacing(8)
+
+        # 模式选择
+        c_mode_row = QHBoxLayout()
+        self.radio_central_target = RadioButton("总学时")
+        self.radio_central_remain = RadioButton("差额补修")
+        if self._saved_central_mode == "remain":
+            self.radio_central_remain.setChecked(True)
+        else:
+            self.radio_central_target.setChecked(True)
+        c_mode_row.addWidget(self.radio_central_target)
+        c_mode_row.addWidget(self.radio_central_remain)
+        c_mode_row.addStretch()
+        central_goal_layout.addLayout(c_mode_row)
+
+        # 学时输入
+        c_hours_row = QHBoxLayout()
+        c_hours_row.addWidget(BodyLabel("目标学时:"))
         self.spin_central = SpinBox()
         self.spin_central.setRange(0, 9999)
         self.spin_central.setValue(int(self._saved_central))
         self.spin_central.setFixedWidth(150)
-        central_goal_row.addWidget(self.spin_central)
-        central_goal_row.addWidget(BodyLabel("学时"))
-        central_goal_row.addStretch()
+        c_hours_row.addWidget(self.spin_central)
+        c_hours_row.addWidget(BodyLabel("学时"))
+        c_hours_row.addStretch()
+        central_goal_layout.addLayout(c_hours_row)
+
         c_layout.addWidget(self.central_goal_widget)
 
         central_card.viewLayout.addLayout(c_layout)
@@ -388,16 +411,35 @@ class GoalScreen(QWidget):
         o_layout.addLayout(o_switch_row)
 
         self.online_goal_widget = QWidget()
-        online_goal_row = QHBoxLayout(self.online_goal_widget)
-        online_goal_row.setContentsMargins(0, 0, 0, 0)
-        online_goal_row.addWidget(BodyLabel("目标学时:"))
+        online_goal_layout = QVBoxLayout(self.online_goal_widget)
+        online_goal_layout.setContentsMargins(0, 0, 0, 0)
+        online_goal_layout.setSpacing(8)
+
+        # 模式选择
+        o_mode_row = QHBoxLayout()
+        self.radio_online_target = RadioButton("总学时")
+        self.radio_online_remain = RadioButton("差额补修")
+        if self._saved_online_mode == "remain":
+            self.radio_online_remain.setChecked(True)
+        else:
+            self.radio_online_target.setChecked(True)
+        o_mode_row.addWidget(self.radio_online_target)
+        o_mode_row.addWidget(self.radio_online_remain)
+        o_mode_row.addStretch()
+        online_goal_layout.addLayout(o_mode_row)
+
+        # 学时输入
+        o_hours_row = QHBoxLayout()
+        o_hours_row.addWidget(BodyLabel("目标学时:"))
         self.spin_online = SpinBox()
         self.spin_online.setRange(0, 9999)
         self.spin_online.setValue(int(self._saved_online))
         self.spin_online.setFixedWidth(150)
-        online_goal_row.addWidget(self.spin_online)
-        online_goal_row.addWidget(BodyLabel("学时"))
-        online_goal_row.addStretch()
+        o_hours_row.addWidget(self.spin_online)
+        o_hours_row.addWidget(BodyLabel("学时"))
+        o_hours_row.addStretch()
+        online_goal_layout.addLayout(o_hours_row)
+
         o_layout.addWidget(self.online_goal_widget)
 
         online_card.viewLayout.addLayout(o_layout)
@@ -434,9 +476,11 @@ class GoalScreen(QWidget):
         online_on = self.switch_online.isChecked()
         central = self.spin_central.value() if central_on else 0
         online = self.spin_online.value() if online_on else 0
-        self._on_done(central_on, central, online_on, online)
+        central_mode = "remain" if self.radio_central_remain.isChecked() else "target"
+        online_mode = "remain" if self.radio_online_remain.isChecked() else "target"
+        self._on_done(central_on, central, central_mode, online_on, online, online_mode)
 
-    def _on_done(self, central_on, central_goal, online_on, online_goal):
+    def _on_done(self, central_on, central_goal, central_mode, online_on, online_goal, online_mode):
         try:
             cfg = {}
             if os.path.exists(CONFIG_PATH):
@@ -444,6 +488,8 @@ class GoalScreen(QWidget):
                     cfg = json.load(f)
             cfg["central_goal"] = central_goal if central_on else 0
             cfg["online_goal"] = online_goal if online_on else 0
+            cfg["central_mode"] = central_mode if central_on else "target"
+            cfg["online_mode"] = online_mode if online_on else "target"
             # 清理旧字段
             cfg.pop("study_goal", None)
             cfg.pop("goal_type", None)
@@ -455,6 +501,8 @@ class GoalScreen(QWidget):
         win = self.window()
         win.cfg_central_goal = central_goal if central_on else 0
         win.cfg_online_goal = online_goal if online_on else 0
+        win.cfg_central_mode = central_mode if central_on else "target"
+        win.cfg_online_mode = online_mode if online_on else "target"
         win.next_screen()
 
 
@@ -889,6 +937,8 @@ class DashboardScreen(QWidget):
             # 获取配置（新格式：central_goal/online_goal，0表示不学习）
             cfg_central_goal = getattr(win, "cfg_central_goal", 0)
             cfg_online_goal = getattr(win, "cfg_online_goal", 0)
+            cfg_central_mode = getattr(win, "cfg_central_mode", "target")
+            cfg_online_mode = getattr(win, "cfg_online_mode", "target")
 
             if cfg_central_goal <= 0 and cfg_online_goal <= 0:
                 log("未设定学习目标，退出", "yellow")
@@ -905,9 +955,11 @@ class DashboardScreen(QWidget):
                     log(f"当前: 集中{cur_hours['central']:.1f} 网络{cur_hours['online']:.1f} 学时", "blue")
                     hours_cb(_h)
 
-                    # 计算实际差额
-                    cfg_central_goal = max(0, cfg_central_goal - cur_hours["central"])
-                    cfg_online_goal = max(0, cfg_online_goal - cur_hours["online"])
+                    # target模式：减去已有学时得到差额；remain模式：直接用
+                    if cfg_central_mode == "target":
+                        cfg_central_goal = max(0, cfg_central_goal - cur_hours["central"])
+                    if cfg_online_mode == "target":
+                        cfg_online_goal = max(0, cfg_online_goal - cur_hours["online"])
 
                     # 检查是否都已完成
                     if cfg_central_goal <= 0 and cfg_online_goal <= 0:
@@ -1669,6 +1721,8 @@ class MainWindow(_BaseWindow):
             self.cfg_headless = cfg.get("headless", False)
             self.cfg_central_goal = cfg.get("central_goal", 0)
             self.cfg_online_goal = cfg.get("online_goal", 0)
+            self.cfg_central_mode = cfg.get("central_mode", "target")
+            self.cfg_online_mode = cfg.get("online_mode", "target")
             # 向后兼容旧格式
             if cfg.get("study_goal", 0) > 0:
                 if cfg.get("goal_type") == "central":
