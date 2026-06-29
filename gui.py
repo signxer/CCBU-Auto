@@ -1314,36 +1314,32 @@ class DashboardScreen(QWidget):
         self.lbl_online.setText(f"网络自学: {data.get('online', 0):.1f} 学时")
         self.lbl_updated.setText(f"更新时间: {data.get('updated', '--')}")
         win = self.window()
-        mode = getattr(win, "cfg_goal_mode", "none")
         c_goal = getattr(win, "cfg_central_goal", 0)
         o_goal = getattr(win, "cfg_online_goal", 0)
+        c_mode = getattr(win, "cfg_central_mode", "target")
+        o_mode = getattr(win, "cfg_online_mode", "target")
 
-        if mode == "none":
-            self.progress_ring.setValue(0)
-            self.lbl_goal_info.setText("不学习")
-            return
-        if mode == "unlimited":
-            self.progress_ring.setValue(0)
-            self.lbl_goal_info.setText("无限制学习")
-            return
-
-        # target / remain 模式：计算当前活跃目标的进度
         c_cur = data.get("central", 0)
         o_cur = data.get("online", 0)
 
+        # 没有目标
+        if c_goal <= 0 and o_goal <= 0:
+            self.progress_ring.setValue(0)
+            self.lbl_goal_info.setText("不学习")
+            return
+
         # 确定当前阶段和目标
         if c_goal > 0 and c_cur < c_goal:
-            # 集中培训阶段
             goal = c_goal
             cur = c_cur
             label = "集中培训"
+            mode = c_mode
         elif o_goal > 0 and o_cur < o_goal:
-            # 网络自学阶段
             goal = o_goal
             cur = o_cur
             label = "网络自学"
+            mode = o_mode
         else:
-            # 全部完成
             self.progress_ring.setValue(100)
             self.lbl_goal_info.setText(f"✓ 全部完成 集中{c_cur:.1f} 网络{o_cur:.1f}")
             self._eta_seconds = None
@@ -1351,7 +1347,11 @@ class DashboardScreen(QWidget):
             self.lbl_eta.setText("✓ 已完成")
             return
 
-        pct_f = min(100.0, cur / goal * 100)
+        # 计算进度
+        if mode == "target":
+            pct_f = min(100.0, cur / goal * 100)
+        else:
+            pct_f = min(100.0, cur / goal * 100) if goal > 0 else 0
         pct = int(pct_f)
         self.progress_ring.setValue(pct)
         remaining = max(0, goal - cur)
