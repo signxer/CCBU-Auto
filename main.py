@@ -209,20 +209,18 @@ class CCBULearner:
         except Exception as e:
             err_msg = str(e)
             if "Executable doesn't exist" in err_msg or "Browser" in err_msg:
-                _log("首次运行，正在安装 Chromium 浏览器...", "blue")
-                import subprocess
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        sys.executable, "-m", "playwright", "install", "chromium",
-                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
-                    )
-                    stdout, stderr = await proc.communicate()
-                    if proc.returncode == 0:
-                        _log("Chromium 安装完成", "green")
+                if getattr(sys, 'frozen', False):
+                    # 打包版：不能自动安装，提示用户手动操作
+                    _log("未找到 Chromium 浏览器，请在终端运行：", "red")
+                    if sys.platform == "win32":
+                        _log("  pip install playwright && python -m playwright install chromium", "yellow")
                     else:
-                        _log(f"Chromium 安装失败: {stderr.decode()}", "red")
-                        raise
-                except FileNotFoundError:
+                        _log("  pip3 install playwright && python3 -m playwright install chromium", "yellow")
+                    raise RuntimeError("Chromium not installed")
+                else:
+                    # 源码运行：自动安装
+                    _log("首次运行，正在安装 Chromium 浏览器...", "blue")
+                    import subprocess
                     subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"])
             else:
                 raise
