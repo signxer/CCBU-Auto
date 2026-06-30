@@ -124,8 +124,6 @@ jobs:
           path: dist/*.dmg
 
   # ── Release ──
-
-  # ── Release ──
   release:
     needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
@@ -141,7 +139,32 @@ jobs:
         run: find artifacts -type f
 
       - name: Create Release
+        id: release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: artifacts/**/*
+
+      - name: Sync to release repo
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_SYNC_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          # 获取 release assets 的下载链接
+          ASSETS=$(gh api repos/${{ github.repository }}/releases/tags/${TAG} --jq '.assets[] | "\(.name) \(.browser_download_url)"')
+          WIN_URL=""
+          MAC_URL=""
+          while IFS=' ' read -r name url; do
+            if echo "$name" | grep -qi "windows\|\.exe"; then
+              WIN_URL="$url"
+            elif echo "$name" | grep -qi "macos\|\.dmg"; then
+              MAC_URL="$url"
+            fi
+          done <<< "$ASSETS"
+          # 触发 release 仓库的同步 workflow
+          gh workflow run sync-release.yml \
+            --repo signxer/ccbu-auto-release \
+            --ref main \
+            -f tag="${TAG}" \
+            -f windows_url="${WIN_URL}" \
+            -f macos_url="${MAC_URL}"
