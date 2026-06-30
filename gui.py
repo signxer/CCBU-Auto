@@ -1197,7 +1197,7 @@ class DashboardScreen(QWidget):
                 # study_goal 是绝对目标值（当前学时 + 还需学时）
                 # phase_goal_hours 是"还需"的值，需要加上当前学时
                 try:
-                    _cur = (await learner._get_study_hours(learner.pages[0])).get(phase_goal_type, 0)
+                    _cur = (await learner._get_study_hours(hours_page)).get(phase_goal_type, 0) if hours_page else 0
                     learner.study_goal = _cur + phase_goal_hours
                 except:
                     learner.study_goal = phase_goal_hours
@@ -1248,9 +1248,9 @@ class DashboardScreen(QWidget):
                             if queue.qsize() > 0:
                                 return 0
                             # 检查当前阶段目标是否已达成
-                            if phase_goal_hours > 0:
+                            if phase_goal_hours > 0 and hours_page:
                                 try:
-                                    _h = await learner._get_study_hours(page)
+                                    _h = await learner._get_study_hours(hours_page)
                                     if _h.get(phase_goal_type, 0) >= phase_goal_hours:
                                         log(f"✓ {type_name}目标已达成!", "bold green")
                                         return 0
