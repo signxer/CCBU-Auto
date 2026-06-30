@@ -156,11 +156,12 @@ jobs:
             --title "润物 Moisten ${TAG}" \
             --generate-notes \
             artifacts/**/* || true
-          # 更新 releases.json
+          # 更新 releases.json（TAG带v前缀如v1.4.1，文件名不带v如Moisten-1.4.1）
           WIN_SIZE=$(stat -c%s artifacts/**/*Windows*.exe 2>/dev/null || echo "0")
           MAC_SIZE=$(stat -c%s artifacts/**/*macOS*.dmg 2>/dev/null || echo "0")
+          VER="${TAG#v}"
           cat > /tmp/releases.json << EOF
-          {"tag":"${TAG}","assets":[{"name":"Windows","file":"Moisten-${TAG}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"Moisten-${TAG}-macOS.dmg","size":${MAC_SIZE}}]}
+          {"tag":"${TAG}","assets":[{"name":"Windows","file":"Moisten-${VER}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"Moisten-${VER}-macOS.dmg","size":${MAC_SIZE}}]}
           EOF
           gh api repos/signxer/Moisten/contents/releases.json \
             --method PUT \
