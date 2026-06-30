@@ -1234,14 +1234,22 @@ class DashboardScreen(QWidget):
                 if tasks:
                     log(f"开始学习（{len(tasks)} 门课程, {cfg_workers} 个线程）", "bold blue")
                     _fetch_lock = asyncio.Lock()
-                    _collect_page = await learner.context.new_page()
 
-                    _fetched_page = 0
+                    # 两个专用页面：一个保持在列表页翻页，一个用于采集课程
+                    _list_page = await learner.context.new_page()
+                    _detail_page = await learner.context.new_page()
+                    # 列表页先导航到专题班列表
+                    try:
+                        await _list_page.goto(
+                            "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
+                            wait_until="domcontentloaded", timeout=20000)
+                        await _list_page.wait_for_timeout(5000)
+                    except:
+                        pass
 
                     async def fetch_more_courses(queue):
-                        nonlocal _fetched_page, no_more_pages
+                        nonlocal no_more_pages, page_num
                         if no_more_pages:
-                            log("无更多页，停止采集", "yellow")
                             return 0
                         async with _fetch_lock:
                             if no_more_pages:
@@ -1249,7 +1257,7 @@ class DashboardScreen(QWidget):
                             if queue.qsize() > 0:
                                 return 0
                             log("课程池空了，自动翻页采集...", "blue")
-                            # 检查当前阶段目标是否已达成
+                            # 检查目标是否已达成
                             if phase_goal_hours > 0 and hours_page:
                                 try:
                                     _h = await learner._get_study_hours(hours_page)
@@ -1258,30 +1266,25 @@ class DashboardScreen(QWidget):
                                         return 0
                                 except:
                                     pass
-                            try:
-                                await _collect_page.goto(
-                                    "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
-                                    wait_until="domcontentloaded", timeout=20000)
-                                await _collect_page.wait_for_timeout(8000)
-                            except:
-                                pass
-                            moved = await learner.go_to_next_page(_collect_page)
+                            # 列表页翻到下一页
+                            moved = await learner.go_to_next_page(_list_page)
                             if not moved:
                                 log("已到最后一页", "yellow")
                                 no_more_pages = True
                                 return 0
-                            nonlocal page_num
                             page_num += 1
-                            _fetched_page = page_num
-                            await _collect_page.wait_for_timeout(5000)
-                            new_ws = await learner.get_workshops(_collect_page)
+                            await _list_page.wait_for_timeout(5000)
+                            # 从列表页获取专题班
+                            new_ws = await learner.get_workshops(_list_page)
                             if not new_ws:
+                                log("下一页无专题班", "yellow")
                                 no_more_pages = True
                                 return 0
                             log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
                             learner.save_progress(completed_ids, page_num, 0)
+                            # 用详情页采集课程（不与列表页冲突）
                             new_t, new_l = await learner._collect_workshops_courses(
-                                _collect_page, new_ws, completed_ids, log_callback=log
+                                _detail_page, new_ws, completed_ids, log_callback=log
                             )
                             ws_locks.update(new_l)
                             for t in new_t:
