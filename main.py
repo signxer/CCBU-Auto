@@ -223,8 +223,6 @@ class CCBULearner:
                         subprocess.run([sys.executable, "-m", "playwright", "install", "chromium"])
                 else:
                     raise
-            else:
-                raise
 
         # 清理Playwright残留的chromium进程（不影响用户自己的浏览器）
         _kill_playwright_chrome()
