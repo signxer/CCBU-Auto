@@ -152,7 +152,7 @@ jobs:
           TAG="${{ github.ref_name }}"
           # 直接在 release 仓库创建 release 并上传文件
           gh release create "${TAG}" \
-            --repo signxer/ccbu-auto-release \
+            --repo signxer/Moisten \
             --title "润物 Moisten ${TAG}" \
             --generate-notes \
             artifacts/**/* || true
@@ -162,8 +162,8 @@ jobs:
           cat > /tmp/releases.json << EOF
           {"tag":"${TAG}","assets":[{"name":"Windows","file":"CCBU-Auto-${TAG}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"CCBU-Auto-${TAG}-macOS.dmg","size":${MAC_SIZE}}]}
           EOF
-          gh api repos/signxer/ccbu-auto-release/contents/releases.json \
+          gh api repos/signxer/Moisten/contents/releases.json \
             --method PUT \
             --field message="update releases.json for ${TAG}" \
             --field content="$(base64 < /tmp/releases.json)" \
-            --field sha="$(gh api repos/signxer/ccbu-auto-release/contents/releases.json --jq '.sha')" || true
+            --field sha="$(gh api repos/signxer/Moisten/contents/releases.json --jq '.sha')" || true
