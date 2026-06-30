@@ -32,7 +32,7 @@ jobs:
 
       - name: Build GUI EXE
         shell: bash
-        run: pyinstaller -F -w --icon=icon.ico --add-data="icon.png;VERSION;." --name=Moisten gui.py
+        run: pyinstaller -F -w --icon=icon.ico --add-data="icon.png;." --add-data="VERSION;." --name=Moisten gui.py
 
       - name: Rename
         shell: bash
