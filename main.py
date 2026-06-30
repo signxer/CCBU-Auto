@@ -2318,6 +2318,39 @@ class CCBULearner:
                         _log(f"  ⊘ 报名已截止，跳过: {ws_title[:30]}", "yellow")
                         return None
 
+                    # 先检查是否需要报名（必须先报名才能看到课程，否则API会400）
+                    need_enroll = False
+                    for kw in ["立即报名", "加入学习", "免费报名"]:
+                        try:
+                            btn = cp.locator(f"text={kw}").first
+                            if await btn.count() > 0 and await btn.is_visible():
+                                _log(f"  需要报名，点击「{kw}」", "blue")
+                                old_url = cp.url
+                                await btn.click()
+                                for _ in range(10):
+                                    await cp.wait_for_timeout(2000)
+                                    if cp.url != old_url:
+                                        break
+                                    try:
+                                        if not await cp.locator(f"text={kw}").first.is_visible(timeout=1000):
+                                            break
+                                    except:
+                                        break
+                                await cp.wait_for_load_state("networkidle", timeout=15000)
+                                await cp.wait_for_timeout(3000)
+                                need_enroll = True
+                                break
+                        except:
+                            pass
+
+                    # 报名后重新导航到详情页
+                    if need_enroll:
+                        try:
+                            await cp.goto(ws_url, wait_until="domcontentloaded", timeout=15000)
+                            await cp.wait_for_timeout(5000)
+                        except:
+                            pass
+
                     # 点击"课程"标签页
                     for tab_text in ["课程", "课程列表", "课程目录"]:
                         try:
@@ -2344,43 +2377,6 @@ class CCBULearner:
                             await cp.wait_for_timeout(5000)
                         else:
                             break
-
-                    # 检查是否需要报名
-                    need_enroll = False
-                    for kw in ["立即报名", "加入学习", "免费报名"]:
-                        try:
-                            btn = cp.locator(f"text={kw}").first
-                            if await btn.count() > 0 and await btn.is_visible():
-                                _log(f"  需要报名，点击「{kw}」", "blue")
-                                old_url = cp.url
-                                await btn.click()
-                                # 等待页面跳转（URL变化或按钮消失）
-                                for _ in range(10):
-                                    await cp.wait_for_timeout(2000)
-                                    new_url = cp.url
-                                    if new_url != old_url:
-                                        debug(f"  报名后URL跳转: {new_url[:80]}")
-                                        break
-                                    try:
-                                        still_visible = await cp.locator(f"text={kw}").first.is_visible(timeout=1000)
-                                        if not still_visible:
-                                            break
-                                    except:
-                                        break
-                                await cp.wait_for_load_state("networkidle", timeout=15000)
-                                await cp.wait_for_timeout(3000)
-                                need_enroll = True
-                                break
-                        except:
-                            pass
-
-                    # 报名后如果URL没变，重新导航到详情页
-                    if need_enroll and "/myworkshop/" not in cp.url:
-                        try:
-                            await cp.goto(ws_url, wait_until="networkidle", timeout=15000)
-                            await cp.wait_for_timeout(3000)
-                        except:
-                            pass
 
                     # 获取课程列表：API重试（最多5次，递增等待，400不重试）
                     courses = []
