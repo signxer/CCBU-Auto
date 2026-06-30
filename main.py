@@ -1872,8 +1872,8 @@ class CCBULearner:
         # 从学习中心获取今年的培训学时
         try:
             await page.goto("https://u.ccb.com/portal/#/studyCenter",
-                           wait_until="networkidle", timeout=20000)
-            await page.wait_for_timeout(5000)
+                           wait_until="domcontentloaded", timeout=20000)
+            await page.wait_for_timeout(8000)
             text = await page.locator("body").inner_text(timeout=5000)
         except Exception as _ex:
             debug(f"学习中心加载失败: {_ex}")
@@ -2939,8 +2939,8 @@ class CCBULearner:
                                 raise GoalReached()
                     except GoalReached:
                         raise
-                    except:
-                        pass
+                    except Exception as _hex:
+                        debug(f"学时刷新失败: {_hex}")
 
                 # Rich模式：更新Live表格
                 if live_ctx:
