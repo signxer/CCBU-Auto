@@ -2885,6 +2885,12 @@ class CCBULearner:
 
         # 用 Live 表格实时刷新
         from rich.live import Live
+        # 创建独立页面用于定时查询学时（不与worker冲突）
+        try:
+            hours_page = await self.context.new_page()
+        except:
+            hours_page = self.pages[0]
+
         # 启动前先查询一次学时
         try:
             _h = await self._get_study_hours(hours_page)
@@ -2896,14 +2902,10 @@ class CCBULearner:
             study_hours_info.update(_info)
             if hours_callback:
                 hours_callback(_info)
+            if log_callback:
+                log_callback(f"学时更新: 集中{_info['central']:.1f} 网络{_info['online']:.1f}", "blue")
         except:
             pass
-
-        # 创建独立页面用于定时查询学时（不与worker冲突）
-        try:
-            hours_page = await self.context.new_page()
-        except:
-            hours_page = self.pages[0]
 
         # 启动所有 worker
         tasks = []
@@ -2912,7 +2914,7 @@ class CCBULearner:
             await asyncio.sleep(2)
 
         # 定时采集学时间隔（秒）
-        HOURS_CHECK_INTERVAL = 60
+        HOURS_CHECK_INTERVAL = 30
 
         # 心跳检测 + 刷新
         async def refresh_display():
@@ -2946,6 +2948,8 @@ class CCBULearner:
                         raise
                     except Exception as _hex:
                         debug(f"学时刷新失败: {_hex}")
+                        if log_callback:
+                            log_callback(f"学时刷新失败: {_hex}", "yellow")
 
                 # Rich模式：更新Live表格
                 if live_ctx:
