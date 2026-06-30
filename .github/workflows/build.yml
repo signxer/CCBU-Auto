@@ -150,21 +150,20 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_SYNC_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          # 获取 release assets 的下载链接
-          ASSETS=$(gh api repos/${{ github.repository }}/releases/tags/${TAG} --jq '.assets[] | "\(.name) \(.browser_download_url)"')
-          WIN_URL=""
-          MAC_URL=""
-          while IFS=' ' read -r name url; do
-            if echo "$name" | grep -qi "windows\|\.exe"; then
-              WIN_URL="$url"
-            elif echo "$name" | grep -qi "macos\|\.dmg"; then
-              MAC_URL="$url"
-            fi
-          done <<< "$ASSETS"
-          # 触发 release 仓库的同步 workflow
-          gh workflow run sync-release.yml \
+          # 直接在 release 仓库创建 release 并上传文件
+          gh release create "${TAG}" \
             --repo signxer/ccbu-auto-release \
-            --ref main \
-            -f tag="${TAG}" \
-            -f windows_url="${WIN_URL}" \
-            -f macos_url="${MAC_URL}"
+            --title "润物细无声 ${TAG}" \
+            --generate-notes \
+            artifacts/**/* || true
+          # 更新 releases.json
+          WIN_SIZE=$(stat -c%s artifacts/**/*Windows*.exe 2>/dev/null || echo "0")
+          MAC_SIZE=$(stat -c%s artifacts/**/*macOS*.dmg 2>/dev/null || echo "0")
+          cat > /tmp/releases.json << EOF
+          {"tag":"${TAG}","assets":[{"name":"Windows","file":"CCBU-Auto-${TAG}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"CCBU-Auto-${TAG}-macOS.dmg","size":${MAC_SIZE}}]}
+          EOF
+          gh api repos/signxer/ccbu-auto-release/contents/releases.json \
+            --method PUT \
+            --field message="update releases.json for ${TAG}" \
+            --field content="$(base64 < /tmp/releases.json)" \
+            --field sha="$(gh api repos/signxer/ccbu-auto-release/contents/releases.json --jq '.sha')" || true
