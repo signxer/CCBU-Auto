@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""CCBU-Auto Fluent Design GUI (QFluentWidgets)"""
+"""润物 Moisten GUI"""
 import asyncio
 import json
 import os
+import urllib.request
 import platform
 import sys
 import threading
@@ -65,6 +66,29 @@ class AsyncThread(QThread):
             self.log_signal.emit(f"错误: {e}", "red")
         finally:
             loop.close()
+
+
+# ─── Version & Update Check ────────────────────────────────────────
+
+CURRENT_VERSION = "1.4.1"
+DOWNLOAD_URL = "https://signxer.github.io/Moisten/"
+
+
+def check_for_update():
+    """检查是否有新版本，返回 (最新版本号, 是否需要更新)"""
+    try:
+        req = urllib.request.Request(
+            "https://raw.githubusercontent.com/signxer/Moisten/main/releases.json",
+            headers={"User-Agent": "Moisten"}
+        )
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        latest = data.get("tag", "").lstrip("v")
+        if latest and latest != CURRENT_VERSION:
+            return latest, True
+    except:
+        pass
+    return CURRENT_VERSION, False
 
 
 # ─── Config Screen ─────────────────────────────────────────────────
@@ -1790,6 +1814,9 @@ class MainWindow(_BaseWindow):
         # 隐藏启动画面
         self.splashScreen.finish()
 
+        # 检查更新（非阻塞）
+        QTimer.singleShot(2000, self._check_update)
+
         # 检查是否有保存的配置，有则自动开始
         has_config = self._load_saved_config()
         if has_config:
@@ -1828,6 +1855,24 @@ class MainWindow(_BaseWindow):
 
         self._screen_index = 0
         self.navigationInterface.hide()
+
+    def _check_update(self):
+        """检查是否有新版本"""
+        try:
+            latest, needs_update = check_for_update()
+            if needs_update:
+                dlg = Dialog(
+                    "发现新版本",
+                    f"当前版本: v{CURRENT_VERSION}\n最新版本: v{latest}",
+                    self
+                )
+                dlg.cancelButton.setText("稍后")
+                dlg.yesButton.setText("前往下载")
+                if dlg.exec():
+                    import webbrowser
+                    webbrowser.open(DOWNLOAD_URL)
+        except:
+            pass
 
     def _load_saved_config(self):
         """加载保存的配置，返回是否有完整配置"""
