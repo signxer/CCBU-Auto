@@ -153,7 +153,7 @@ jobs:
           # 直接在 release 仓库创建 release 并上传文件
           gh release create "${TAG}" \
             --repo signxer/ccbu-auto-release \
-            --title "润物细无声 ${TAG}" \
+            --title "润物 Moisten ${TAG}" \
             --generate-notes \
             artifacts/**/* || true
           # 更新 releases.json

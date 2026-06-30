@@ -778,7 +778,7 @@ class DashboardScreen(QWidget):
         # Header
         header = QHBoxLayout()
         header.setSpacing(8)
-        title = StrongBodyLabel("润物细无声 CCBU-Auto")
+        title = StrongBodyLabel("润物 Moisten")
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header.addWidget(title)
         header.addStretch()
@@ -1741,7 +1741,7 @@ else:
 class MainWindow(_BaseWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("润物细无声 CCBU-Auto")
+        self.setWindowTitle("润物 Moisten")
         self.resize(1000, 650)
         self.setMinimumSize(800, 500)
         self._drag_pos = None
