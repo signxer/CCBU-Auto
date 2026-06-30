@@ -2914,7 +2914,7 @@ class CCBULearner:
             await asyncio.sleep(2)
 
         # 定时采集学时间隔（秒）
-        HOURS_CHECK_INTERVAL = 30
+        HOURS_CHECK_INTERVAL = 60
 
         # 心跳检测 + 刷新
         async def refresh_display():
