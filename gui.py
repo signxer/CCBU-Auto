@@ -96,7 +96,7 @@ class ConfigScreen(QWidget):
         layout.addWidget(title)
 
         subtitle = BodyLabel("设置工作线程数和浏览器模式")
-        subtitle.setForegroundRole(self.palette().PlaceholderText)
+        subtitle.setStyleSheet("color: #888;")
         layout.addWidget(subtitle)
 
         layout.addSpacing(10)
@@ -116,7 +116,7 @@ class ConfigScreen(QWidget):
         w_layout.addWidget(self.spin_workers)
         w_layout.addWidget(BodyLabel("个线程"))
         w_hint = CaptionLabel("建议 3-10")
-        w_hint.setForegroundRole(self.palette().PlaceholderText)
+        w_hint.setStyleSheet("color: #888;")
         w_layout.addWidget(w_hint)
         w_layout.addStretch()
         workers_card.viewLayout.addLayout(w_layout)
@@ -266,7 +266,7 @@ class LoginScreen(QWidget):
         layout.addWidget(title)
 
         subtitle = BodyLabel("输入建行统一认证账号密码")
-        subtitle.setForegroundRole(self.palette().PlaceholderText)
+        subtitle.setStyleSheet("color: #888;")
         layout.addWidget(subtitle)
 
         layout.addSpacing(10)
@@ -401,7 +401,7 @@ class GoalScreen(QWidget):
         layout.addWidget(title)
 
         subtitle = BodyLabel("分别设置集中培训和网络自学的学习目标")
-        subtitle.setForegroundRole(self.palette().PlaceholderText)
+        subtitle.setStyleSheet("color: #888;")
         layout.addWidget(subtitle)
 
         layout.addSpacing(10)
@@ -608,7 +608,7 @@ class ModeScreen(QWidget):
         layout.addWidget(title)
 
         subtitle = BodyLabel("选择学习方式，后续可在设置中切换")
-        subtitle.setForegroundRole(self.palette().PlaceholderText)
+        subtitle.setStyleSheet("color: #888;")
         layout.addWidget(subtitle)
 
         layout.addSpacing(24)
@@ -624,7 +624,7 @@ class ModeScreen(QWidget):
         a_desc.setStyleSheet("line-height: 1.4;")
         a_layout.addWidget(a_desc)
         a_hint = CaptionLabel("适合：需要完成学时目标的日常挂机学习")
-        a_hint.setForegroundRole(self.palette().PlaceholderText)
+        a_hint.setStyleSheet("color: #888;")
         a_layout.addWidget(a_hint)
         a_layout.addSpacing(8)
         btn_auto = PrimaryPushButton("  选择自动模式")
@@ -648,7 +648,7 @@ class ModeScreen(QWidget):
         m_desc.setStyleSheet("line-height: 1.4;")
         m_layout.addWidget(m_desc)
         m_hint = CaptionLabel("适合：学习特定课程、补学指定内容")
-        m_hint.setForegroundRole(self.palette().PlaceholderText)
+        m_hint.setStyleSheet("color: #888;")
         m_layout.addWidget(m_hint)
         m_layout.addSpacing(8)
         btn_manual = PrimaryPushButton("  选择手动模式")
@@ -690,7 +690,7 @@ class ManualScreen(QWidget):
         layout.addWidget(title)
 
         subtitle = BodyLabel("输入专题班或课程的URL，每行一个")
-        subtitle.setForegroundRole(self.palette().PlaceholderText)
+        subtitle.setStyleSheet("color: #888;")
         layout.addWidget(subtitle)
 
         # URL input card
@@ -711,7 +711,7 @@ class ManualScreen(QWidget):
         i_layout.addWidget(self.text_urls)
 
         hint = CaptionLabel("支持专题班详情页URL，会自动提取其中的课程")
-        hint.setForegroundRole(self.palette().PlaceholderText)
+        hint.setStyleSheet("color: #888;")
         i_layout.addWidget(hint)
 
         input_card.viewLayout.addLayout(i_layout)
@@ -1479,7 +1479,7 @@ class DashboardScreen(QWidget):
         outer.addLayout(header)
 
         hint = CaptionLabel("不选则学习全部内容")
-        hint.setForegroundRole(self.palette().PlaceholderText)
+        hint.setStyleSheet("color: #888;")
         outer.addWidget(hint)
 
         # Scroll area with checkboxes
