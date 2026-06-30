@@ -1188,7 +1188,13 @@ class DashboardScreen(QWidget):
                 self._eta_seconds = None
                 self._eta_calc_time = None
 
-                learner.study_goal = phase_goal_hours
+                # study_goal 是绝对目标值（当前学时 + 还需学时）
+                # phase_goal_hours 是"还需"的值，需要加上当前学时
+                try:
+                    _cur = (await learner._get_study_hours(learner.pages[0])).get(phase_goal_type, 0)
+                    learner.study_goal = _cur + phase_goal_hours
+                except:
+                    learner.study_goal = phase_goal_hours
                 learner.goal_type = phase_goal_type
 
                 no_more_pages = False
