@@ -1267,7 +1267,12 @@ class DashboardScreen(QWidget):
                                 except:
                                     pass
                             # 列表页翻到下一页
-                            moved = await learner.go_to_next_page(_list_page)
+                            try:
+                                moved = await learner.go_to_next_page(_list_page)
+                            except Exception as e:
+                                log(f"翻页失败: {e}", "red")
+                                no_more_pages = True
+                                return 0
                             if not moved:
                                 log("已到最后一页", "yellow")
                                 no_more_pages = True
@@ -1275,22 +1280,29 @@ class DashboardScreen(QWidget):
                             page_num += 1
                             await _list_page.wait_for_timeout(5000)
                             # 从列表页获取专题班
-                            new_ws = await learner.get_workshops(_list_page)
+                            try:
+                                new_ws = await learner.get_workshops(_list_page)
+                            except Exception as e:
+                                log(f"获取专题班失败: {e}", "red")
+                                return 0
                             if not new_ws:
                                 log("下一页无专题班", "yellow")
                                 no_more_pages = True
                                 return 0
                             log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
                             learner.save_progress(completed_ids, page_num, 0)
-                            # 用详情页采集课程（不与列表页冲突）
-                            new_t, new_l = await learner._collect_workshops_courses(
-                                _detail_page, new_ws, completed_ids, log_callback=log
-                            )
+                            # 用独立页面采集课程
+                            try:
+                                new_t, new_l = await learner._collect_workshops_courses(
+                                    _detail_page, new_ws, completed_ids, log_callback=log
+                                )
+                            except Exception as e:
+                                log(f"采集课程失败: {e}", "red")
+                                return 0
                             ws_locks.update(new_l)
                             for t in new_t:
                                 queue.put_nowait((*t, 0))
-                            if new_t:
-                                log(f"新增 {len(new_t)} 门课程", "green")
+                            log(f"新增 {len(new_t)} 门课程", "green")
                             return len(new_t)
 
                     await learner.parallel_learn_courses(

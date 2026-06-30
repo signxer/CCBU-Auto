@@ -30,11 +30,11 @@ jobs:
 
       - name: Build GUI EXE
         shell: bash
-        run: pyinstaller -F -w --icon=icon.ico --add-data="icon.png;." --name=CCBU-Auto gui.py
+        run: pyinstaller -F -w --icon=icon.ico --add-data="icon.png;." --name=Moisten gui.py
 
       - name: Rename
         shell: bash
-        run: mv dist/CCBU-Auto.exe "dist/CCBU-Auto-${{ steps.version.outputs.VERSION }}-Windows.exe"
+        run: mv dist/Moisten.exe "dist/Moisten-${{ steps.version.outputs.VERSION }}-Windows.exe"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -92,30 +92,30 @@ jobs:
           "
 
       - name: Build GUI .app
-        run: pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --name=CCBU-Auto gui.py
+        run: pyinstaller -F -w --icon=icon.icns --add-data="icon.png:." --name=Moisten gui.py
 
       - name: Create DMG
         run: |
           mkdir -p dmg-dist dist
           # 创建 .app 包装
-          mkdir -p CCBU-Auto.app/Contents/MacOS
-          mkdir -p CCBU-Auto.app/Contents/Resources
-          cp dist/CCBU-Auto CCBU-Auto.app/Contents/MacOS/
-          cp icon.png CCBU-Auto.app/Contents/Resources/
-          cat > CCBU-Auto.app/Contents/Info.plist << 'EOF'
+          mkdir -p Moisten.app/Contents/MacOS
+          mkdir -p Moisten.app/Contents/Resources
+          cp dist/Moisten Moisten.app/Contents/MacOS/
+          cp icon.png Moisten.app/Contents/Resources/
+          cat > Moisten.app/Contents/Info.plist << 'EOF'
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
           <plist version="1.0"><dict>
-          <key>CFBundleExecutable</key><string>CCBU-Auto</string>
+          <key>CFBundleExecutable><string>Moisten</string>
           <key>CFBundleIconFile</key><string>icon</string>
-          <key>CFBundleName</key><string>CCBU-Auto</string>
-          <key>CFBundleIdentifier</key><string>com.ccbu.auto</string>
+          <key>CFBundleName><string>Moisten</string>
+          <key>CFBundleIdentifier</key><string>com.moisten.app</string>
           <key>CFBundleVersion</key><string>1.0</string>
           </dict></plist>
           EOF
-          cp -r CCBU-Auto.app dmg-dist/
+          cp -r Moisten.app dmg-dist/
           ln -sf /Applications dmg-dist/Applications
-          hdiutil create -volname CCBU-Auto -srcfolder dmg-dist -ov -format UDZO dist/CCBU-Auto-${{ steps.version.outputs.VERSION }}-macOS.dmg
+          hdiutil create -volname Moisten -srcfolder dmg-dist -ov -format UDZO dist/Moisten-${{ steps.version.outputs.VERSION }}-macOS.dmg
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -160,7 +160,7 @@ jobs:
           WIN_SIZE=$(stat -c%s artifacts/**/*Windows*.exe 2>/dev/null || echo "0")
           MAC_SIZE=$(stat -c%s artifacts/**/*macOS*.dmg 2>/dev/null || echo "0")
           cat > /tmp/releases.json << EOF
-          {"tag":"${TAG}","assets":[{"name":"Windows","file":"CCBU-Auto-${TAG}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"CCBU-Auto-${TAG}-macOS.dmg","size":${MAC_SIZE}}]}
+          {"tag":"${TAG}","assets":[{"name":"Windows","file":"Moisten-${TAG}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"Moisten-${TAG}-macOS.dmg","size":${MAC_SIZE}}]}
           EOF
           gh api repos/signxer/Moisten/contents/releases.json \
             --method PUT \
