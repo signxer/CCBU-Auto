@@ -1039,7 +1039,9 @@ class DashboardScreen(QWidget):
                     log(f"当前: 集中{cur_hours['central']:.1f} 网络{cur_hours['online']:.1f} 学时", "blue")
                     hours_cb(_h)
 
-                    # target模式：减去已有学时得到差额；remain模式：直接用
+                    # 统一转成"还需学习多少"：
+                    # target模式：总目标 - 已有 = 还需
+                    # remain模式：差额本身就是还需
                     if cfg_central_mode == "target":
                         cfg_central_goal = max(0, cfg_central_goal - cur_hours["central"])
                     if cfg_online_mode == "target":
@@ -1192,9 +1194,8 @@ class DashboardScreen(QWidget):
                 tasks = []
                 ws_locks = {}
 
-                # 采集第一页后立即开始学习
-                first_page_collected = False
-                while not first_page_collected:
+                # 采集课程，至少凑够 worker 数量再开始学（除非已无更多页）
+                while len(tasks) < cfg_workers and not no_more_pages:
                     workshops = await learner.get_workshops(page)
                     if not workshops:
                         no_more_pages = True
@@ -1206,15 +1207,15 @@ class DashboardScreen(QWidget):
                     )
                     tasks.extend(new_tasks)
                     ws_locks.update(new_locks)
-                    if tasks:
-                        first_page_collected = True
+                    if len(tasks) >= cfg_workers:
                         break
-                    log("当前页无可用课程，翻页继续...", "yellow")
+                    log(f"已采集 {len(tasks)} 门，不足 {cfg_workers}，翻页继续...", "yellow")
                     moved = await learner.go_to_next_page(page)
                     if not moved:
                         no_more_pages = True
                     else:
                         page_num += 1
+                        await page.wait_for_timeout(3000)
                         await page.wait_for_timeout(3000)
 
                 if tasks:
@@ -1322,23 +1323,25 @@ class DashboardScreen(QWidget):
         c_cur = data.get("central", 0)
         o_cur = data.get("online", 0)
 
+        # 差额模式：目标 = 已有 + 差额
+        c_target = c_cur + c_goal if c_mode == "remain" else c_goal
+        o_target = o_cur + o_goal if o_mode == "remain" else o_goal
+
         # 没有目标
-        if c_goal <= 0 and o_goal <= 0:
+        if c_target <= 0 and o_target <= 0:
             self.progress_ring.setValue(0)
             self.lbl_goal_info.setText("不学习")
             return
 
         # 确定当前阶段和目标
-        if c_goal > 0 and c_cur < c_goal:
-            goal = c_goal
+        if c_target > 0 and c_cur < c_target:
+            goal = c_target
             cur = c_cur
             label = "集中培训"
-            mode = c_mode
-        elif o_goal > 0 and o_cur < o_goal:
-            goal = o_goal
+        elif o_target > 0 and o_cur < o_target:
+            goal = o_target
             cur = o_cur
             label = "网络自学"
-            mode = o_mode
         else:
             self.progress_ring.setValue(100)
             self.lbl_goal_info.setText(f"✓ 全部完成 集中{c_cur:.1f} 网络{o_cur:.1f}")
@@ -1348,10 +1351,7 @@ class DashboardScreen(QWidget):
             return
 
         # 计算进度
-        if mode == "target":
-            pct_f = min(100.0, cur / goal * 100)
-        else:
-            pct_f = min(100.0, cur / goal * 100) if goal > 0 else 0
+        pct_f = min(100.0, cur / goal * 100) if goal > 0 else 0
         pct = int(pct_f)
         self.progress_ring.setValue(pct)
         remaining = max(0, goal - cur)
