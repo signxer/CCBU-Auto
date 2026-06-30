@@ -2343,40 +2343,40 @@ class CCBULearner:
                         except:
                             pass
 
-                    # 报名后重新导航到详情页
+                    # 报名后重新导航到详情页，等服务器处理
                     if need_enroll:
                         try:
                             await cp.goto(ws_url, wait_until="domcontentloaded", timeout=15000)
                             await cp.wait_for_timeout(5000)
                         except:
                             pass
+                    else:
+                        # 未报名的也点课程标签（已报名的跳过，直接API采集）
+                        for tab_text in ["课程", "课程列表", "课程目录"]:
+                            try:
+                                tab = cp.locator(f"text={tab_text}").first
+                                if await tab.count() > 0 and await tab.is_visible():
+                                    await tab.click()
+                                    await cp.wait_for_timeout(3000)
+                                    break
+                            except:
+                                pass
 
-                    # 点击"课程"标签页
-                    for tab_text in ["课程", "课程列表", "课程目录"]:
-                        try:
-                            tab = cp.locator(f"text={tab_text}").first
-                            if await tab.count() > 0 and await tab.is_visible():
-                                await tab.click()
-                                await cp.wait_for_timeout(3000)
+                        # 等待课程表格加载
+                        for _wait in range(3):
+                            row_count = await cp.locator("tr.text-center").count()
+                            if row_count > 0:
                                 break
-                        except:
-                            pass
-
-                    # 等待课程表格加载
-                    for _wait in range(3):
-                        row_count = await cp.locator("tr.text-center").count()
-                        if row_count > 0:
-                            break
-                        page_text = ""
-                        try:
-                            page_text = await cp.locator("body").inner_text(timeout=2000)
-                        except:
-                            pass
-                        if "NaN" in page_text or "总课程门" in page_text:
-                            debug(f"  表格数据未加载，等待刷新({_wait+1}/3)")
-                            await cp.wait_for_timeout(5000)
-                        else:
-                            break
+                            page_text = ""
+                            try:
+                                page_text = await cp.locator("body").inner_text(timeout=2000)
+                            except:
+                                pass
+                            if "NaN" in page_text or "总课程门" in page_text:
+                                debug(f"  表格数据未加载，等待刷新({_wait+1}/3)")
+                                await cp.wait_for_timeout(5000)
+                            else:
+                                break
 
                     # 获取课程列表：API重试（最多5次，递增等待，400不重试）
                     courses = []
