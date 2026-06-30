@@ -2887,23 +2887,24 @@ class CCBULearner:
         try:
             hours_page = await self.context.new_page()
         except:
-            hours_page = self.pages[0]
+            hours_page = None
 
         # 启动前先查询一次学时
-        try:
-            _h = await self._get_study_hours(hours_page)
-            _info = {
-                "central": _h.get("central", 0),
-                "online": _h.get("online", 0),
-                "updated": datetime.now().strftime("%H:%M:%S"),
-            }
-            study_hours_info.update(_info)
-            if hours_callback:
-                hours_callback(_info)
-            if log_callback:
-                log_callback(f"学时更新: 集中{_info['central']:.1f} 网络{_info['online']:.1f}", "blue")
-        except:
-            pass
+        if hours_page:
+            try:
+                _h = await self._get_study_hours(hours_page)
+                _info = {
+                    "central": _h.get("central", 0),
+                    "online": _h.get("online", 0),
+                    "updated": datetime.now().strftime("%H:%M:%S"),
+                }
+                study_hours_info.update(_info)
+                if hours_callback:
+                    hours_callback(_info)
+                if log_callback:
+                    log_callback(f"学时更新: 集中{_info['central']:.1f} 网络{_info['online']:.1f}", "blue")
+            except:
+                pass
 
         # 启动所有 worker
         tasks = []
@@ -2922,7 +2923,7 @@ class CCBULearner:
                 now = time.time()
 
                 # 定时采集总体学习进度（两种模式统一处理）
-                if now - last_hours_check >= HOURS_CHECK_INTERVAL:
+                if now - last_hours_check >= HOURS_CHECK_INTERVAL and hours_page:
                     last_hours_check = now
                     try:
                         _h = await asyncio.wait_for(
