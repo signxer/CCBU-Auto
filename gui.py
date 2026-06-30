@@ -1029,6 +1029,12 @@ class DashboardScreen(QWidget):
                 thread.done_signal.emit(0, 0)
                 return
 
+            # 创建独立页面用于学时查询
+            try:
+                hours_page = await learner.context.new_page()
+            except:
+                hours_page = learner.pages[0]
+
             # 登录后立即检查学时
             cur_hours = {"central": 0, "online": 0}
             if cfg_central_goal > 0 or cfg_online_goal > 0:
