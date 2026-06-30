@@ -1047,6 +1047,7 @@ class DashboardScreen(QWidget):
                     if cfg_online_mode == "target":
                         cfg_online_goal = max(0, cfg_online_goal - cur_hours["online"])
 
+                    # 存储"还需"值供phases判断，不改win上的原始目标（_on_hours要用原始值算进度）
                     # 检查是否都已完成
                     if cfg_central_goal <= 0 and cfg_online_goal <= 0:
                         log(f"已达到全部学习目标，无需学习", "bold green")
