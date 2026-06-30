@@ -1034,7 +1034,7 @@ class DashboardScreen(QWidget):
             if cfg_central_goal > 0 or cfg_online_goal > 0:
                 log("正在检查当前学时...", "blue")
                 try:
-                    _h = await learner._get_study_hours(learner.pages[0])
+                    _h = await learner._get_study_hours(hours_page)
                     cur_hours = {"central": _h.get("central", 0), "online": _h.get("online", 0)}
                     log(f"当前: 集中{cur_hours['central']:.1f} 网络{cur_hours['online']:.1f} 学时", "blue")
                     hours_cb(_h)
