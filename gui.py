@@ -290,6 +290,13 @@ class LoginScreen(QWidget):
             try:
                 with open(path, "r", encoding="utf-8") as f:
                     self._creds = json.load(f)
+                # 解密密码
+                if self._creds.get("password"):
+                    try:
+                        from main import CCBULearner
+                        self._creds["password"] = CCBULearner._xor_decrypt(self._creds["password"])
+                    except:
+                        pass  # 兼容旧的明文密码
             except:
                 pass
 
