@@ -392,21 +392,46 @@ class CCBULearner:
             console.print(f"检查登录状态失败: {e}", style="yellow")
             return False
 
+    @staticmethod
+    def _xor_crypt(data: str, key: int = 5277) -> str:
+        """XOR + base64 加密/解密"""
+        import base64
+        key_bytes = str(key).encode()
+        encrypted = bytes(b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(data.encode()))
+        return base64.b64encode(encrypted).decode()
+
+    @staticmethod
+    def _xor_decrypt(token: str, key: int = 5277) -> str:
+        """XOR + base64 解密"""
+        import base64
+        key_bytes = str(key).encode()
+        decoded = base64.b64decode(token)
+        decrypted = bytes(b ^ key_bytes[i % len(key_bytes)] for i, b in enumerate(decoded))
+        return decrypted.decode()
+
     def load_user_credentials(self) -> Optional[Dict]:
         """加载保存的用户凭证"""
         if os.path.exists(USER_CREDENTIALS_PATH):
             try:
                 with open(USER_CREDENTIALS_PATH, 'r', encoding='utf-8') as f:
-                    return json.load(f)
+                    data = json.load(f)
+                # 解密密码
+                if 'password' in data and data['password']:
+                    try:
+                        data['password'] = self._xor_decrypt(data['password'])
+                    except:
+                        pass  # 兼容旧的明文密码
+                return data
             except Exception as e:
                 console.print("加载凭证失败", style="yellow")
         return None
 
     def save_user_credentials(self, username: str, password: str):
-        """保存用户凭证"""
+        """保存用户凭证（密码加密存储）"""
         try:
+            encrypted_pw = self._xor_crypt(password) if password else ""
             with open(USER_CREDENTIALS_PATH, 'w', encoding='utf-8') as f:
-                json.dump({"username": username, "password": password}, f, ensure_ascii=False, indent=2)
+                json.dump({"username": username, "password": encrypted_pw}, f, ensure_ascii=False, indent=2)
             console.print("凭证已保存", style="green")
         except Exception as e:
             console.print("保存凭证失败", style="yellow")
