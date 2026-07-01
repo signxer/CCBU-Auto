@@ -180,3 +180,20 @@ jobs:
         run: |
           gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts[].id' | \
             while read id; do gh api repos/${{ github.repository }}/actions/artifacts/$id -X DELETE 2>/dev/null; done || true
+
+      - name: Update VERSION in repo
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_SYNC_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          VER="${TAG#v}"
+          # 获取当前VERSION文件的SHA
+          SHA=$(gh api repos/${{ github.repository }}/contents/VERSION --jq '.sha' 2>/dev/null || echo "")
+          if [ -n "$SHA" ]; then
+            echo -n "$VER" | base64 > /tmp/version_b64
+            gh api repos/${{ github.repository }}/contents/VERSION \
+              --method PUT \
+              --field message="chore: VERSION ${VER}" \
+              --field content="$(echo -n "$VER" | base64)" \
+              --field sha="$SHA" || true
+          fi
