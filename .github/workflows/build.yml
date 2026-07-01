@@ -172,3 +172,11 @@ jobs:
             --field message="update releases.json for ${TAG}" \
             --field content="$(base64 < /tmp/releases.json)" \
             --field sha="$(gh api repos/signxer/Moisten/contents/releases.json --jq '.sha')" || true
+
+      - name: Cleanup artifacts
+        if: always()
+        uses: geekyeggo/delete-artifact@v2
+        with:
+          name: |
+            windows
+            macos
