@@ -87,7 +87,7 @@ DOWNLOAD_URL = "https://signxer.github.io/Moisten/"
 
 
 def check_for_update():
-    """检查是否有新版本，返回 (最新版本号, 是否需要更新)"""
+    """检查是否有新版本，返回 (最新版本号, 是否需要更新, 更新日志)"""
     try:
         req = urllib.request.Request(
             "https://raw.githubusercontent.com/signxer/Moisten/main/releases.json",
@@ -96,11 +96,12 @@ def check_for_update():
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
         latest = data.get("tag", "").lstrip("v")
+        notes = data.get("notes", "")
         if latest and latest != CURRENT_VERSION:
-            return latest, True
+            return latest, True, notes
     except:
         pass
-    return CURRENT_VERSION, False
+    return CURRENT_VERSION, False, ""
 
 
 # ─── Config Screen ─────────────────────────────────────────────────
@@ -1871,11 +1872,14 @@ class MainWindow(_BaseWindow):
     def _check_update(self):
         """检查是否有新版本"""
         try:
-            latest, needs_update = check_for_update()
+            latest, needs_update, notes = check_for_update()
             if needs_update:
+                msg = f"当前版本: v{CURRENT_VERSION}\n最新版本: v{latest}"
+                if notes:
+                    msg += f"\n\n更新内容:\n{notes}"
                 dlg = Dialog(
                     "发现新版本",
-                    f"当前版本: v{CURRENT_VERSION}\n最新版本: v{latest}",
+                    msg,
                     self
                 )
                 dlg.cancelButton.setText("稍后")

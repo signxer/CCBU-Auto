@@ -154,18 +154,27 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASE_SYNC_TOKEN }}
         run: |
           TAG="${{ github.ref_name }}"
-          # 直接在 release 仓库创建 release 并上传文件
+          VER="${TAG#v}"
+          # 读取CHANGELOG中当前版本的更新内容
+          NOTES=""
+          if [ -f CHANGELOG.md ]; then
+            NOTES=$(awk "/^## ${VER}/{found=1; next} /^## [0-9]/{found=0} found" CHANGELOG.md)
+          fi
+          if [ -z "$NOTES" ]; then
+            NOTES="详见更新日志"
+          fi
+          # 创建release
           gh release create "${TAG}" \
             --repo signxer/Moisten \
             --title "润物 Moisten ${TAG}" \
-            --generate-notes \
+            --notes "$NOTES" \
             artifacts/**/* || true
-          # 更新 releases.json（TAG带v前缀如v1.4.1，文件名不带v如Moisten-1.4.1）
+          # 更新releases.json（含更新日志）
           WIN_SIZE=$(stat -c%s artifacts/**/*Windows*.exe 2>/dev/null || echo "0")
           MAC_SIZE=$(stat -c%s artifacts/**/*macOS*.dmg 2>/dev/null || echo "0")
-          VER="${TAG#v}"
+          NOTES_JSON=$(echo "$NOTES" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip()))")
           cat > /tmp/releases.json << EOF
-          {"tag":"${TAG}","assets":[{"name":"Windows","file":"Moisten-${VER}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"Moisten-${VER}-macOS.dmg","size":${MAC_SIZE}}]}
+          {"tag":"${TAG}","assets":[{"name":"Windows","file":"Moisten-${VER}-Windows.exe","size":${WIN_SIZE}},{"name":"macOS","file":"Moisten-${VER}-macOS.dmg","size":${MAC_SIZE}}],"notes":${NOTES_JSON}}
           EOF
           gh api repos/signxer/Moisten/contents/releases.json \
             --method PUT \
