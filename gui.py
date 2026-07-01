@@ -376,10 +376,9 @@ class LoginScreen(QWidget):
             InfoBar.warning("提示", "请输入账号", parent=self, position=InfoBarPosition.TOP)
             return
 
-        path = USER_CREDENTIALS_PATH
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump({"username": username, "password": password}, f, ensure_ascii=False, indent=2)
+            from main import CCBULearner
+            CCBULearner().save_user_credentials(username, password)
         except:
             pass
 
