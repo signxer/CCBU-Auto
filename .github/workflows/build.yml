@@ -175,8 +175,8 @@ jobs:
 
       - name: Cleanup artifacts
         if: always()
-        uses: geekyeggo/delete-artifact@v2
-        with:
-          name: |
-            windows
-            macos
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api repos/${{ github.repository }}/actions/artifacts --jq '.artifacts[].id' | \
+            while read id; do gh api repos/${{ github.repository }}/actions/artifacts/$id -X DELETE 2>/dev/null; done || true
