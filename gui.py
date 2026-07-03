@@ -1340,6 +1340,23 @@ class DashboardScreen(QWidget):
                     except:
                         pass
 
+                    async def _refresh_session():
+                        """刷新session：重新访问登录页触发cookie刷新"""
+                        log("检测到Session过期，尝试刷新...", "yellow")
+                        try:
+                            await _list_page.goto("https://u.ccb.com/portal/#/study",
+                                                  wait_until="domcontentloaded", timeout=15000)
+                            await _list_page.wait_for_timeout(5000)
+                            # 检查是否需要重新登录
+                            body = await _list_page.locator("body").inner_text(timeout=3000)
+                            if "立即登录" in body or "密码登录" in body:
+                                log("Session已失效，需要重新登录", "red")
+                                return False
+                            log("Session刷新成功", "green")
+                            return True
+                        except:
+                            return False
+
                     async def fetch_more_courses(queue):
                         nonlocal no_more_pages, page_num
                         if no_more_pages:
@@ -1364,9 +1381,17 @@ class DashboardScreen(QWidget):
                             try:
                                 moved = await learner.go_to_next_page(_list_page)
                             except Exception as e:
-                                log(f"翻页失败: {e}", "red")
-                                no_more_pages = True
-                                return 0
+                                # 可能是session过期，尝试刷新
+                                if "401" in str(e) or "403" in str(e):
+                                    if await _refresh_session():
+                                        moved = await learner.go_to_next_page(_list_page)
+                                    else:
+                                        no_more_pages = True
+                                        return 0
+                                else:
+                                    log(f"翻页失败: {e}", "red")
+                                    no_more_pages = True
+                                    return 0
                             if not moved:
                                 log("已到最后一页", "yellow")
                                 no_more_pages = True
@@ -1385,14 +1410,26 @@ class DashboardScreen(QWidget):
                                 return 0
                             log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
                             learner.save_progress(completed_ids, page_num, 0)
-                            # 用独立页面采集课程
+                            # 用独立页面采集课程（401时刷新session重试）
+                            new_t, new_l = [], {}
                             try:
                                 new_t, new_l = await learner._collect_workshops_courses(
                                     _detail_page, new_ws, completed_ids, log_callback=log
                                 )
                             except Exception as e:
-                                log(f"采集课程失败: {e}", "red")
-                                return 0
+                                if "401" in str(e) or "403" in str(e):
+                                    if await _refresh_session():
+                                        try:
+                                            new_t, new_l = await learner._collect_workshops_courses(
+                                                _detail_page, new_ws, completed_ids, log_callback=log
+                                            )
+                                        except:
+                                            pass
+                                    else:
+                                        return 0
+                                else:
+                                    log(f"采集课程失败: {e}", "red")
+                                    return 0
                             ws_locks.update(new_l)
                             for t in new_t:
                                 queue.put_nowait((*t, 0))
