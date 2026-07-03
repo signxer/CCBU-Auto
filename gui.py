@@ -2004,34 +2004,63 @@ class MainWindow(_BaseWindow):
         threading.Thread(target=do_download, daemon=True).start()
 
     def _apply_update(self, download_path):
-        """用下载的文件替换自己"""
+        """用下载的文件替换自己（通过外部脚本）"""
         import platform as _plat
-        import shutil
         import subprocess
+        import tempfile
+        import shutil
 
-        if _plat.system() == "Windows":
-            # Windows: 重命名当前exe，复制新的，重启
-            current = sys.executable
-            if current.endswith(".exe"):
-                old_path = current + ".old"
-                try:
-                    os.rename(current, old_path)
-                    shutil.copy2(download_path, current)
-                    InfoBar.success("更新完成", "重启生效", parent=self, position=InfoBarPosition.TOP)
-                    # 启动新版本
-                    subprocess.Popen([current])
-                    sys.exit(0)
-                except Exception as e:
-                    # 回滚
-                    if os.path.exists(old_path):
-                        os.rename(old_path, current)
-                    InfoBar.error("更新失败", str(e), parent=self, position=InfoBarPosition.TOP)
+        current = sys.executable
+
+        if _plat.system() == "Windows" and current.endswith(".exe"):
+            # 写一个bat脚本：等主程序退出 → 替换 → 重启
+            bat_path = os.path.join(tempfile.gettempdir(), "moisten_update.bat")
+            with open(bat_path, "w") as f:
+                f.write(f"""@echo off
+echo 正在更新...
+:wait
+tasklist /fi "PID eq {os.getpid()}" | find "{os.getpid()}" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    goto wait
+)
+copy /y "{download_path}" "{current}" >nul
+del "{download_path}" >nul
+start "" "{current}"
+del "%~f0"
+""")
+            # 启动bat脚本，退出自己
+            subprocess.Popen(["cmd", "/c", bat_path], creationflags=0x08000000)
+            InfoBar.success("更新中", "程序将自动重启", parent=self, position=InfoBarPosition.TOP)
+            QTimer.singleShot(500, sys.exit)
+
+        elif _plat.system() == "Darwin":
+            # macOS: 写一个shell脚本
+            app_path = None
+            if current.endswith("/Moisten") or "/Contents/MacOS/" in current:
+                # 从.app bundle运行，找到.app路径
+                app_path = current.split("/Contents/MacOS/")[0]
+
+            if app_path:
+                sh_path = os.path.join(tempfile.gettempdir(), "moisten_update.sh")
+                with open(sh_path, "w") as f:
+                    f.write(f"""#!/bin/bash
+echo "正在更新..."
+sleep 2
+cp -f "{download_path}" "{app_path}/Contents/MacOS/Moisten"
+rm -f "{download_path}"
+open "{app_path}"
+rm -f "{sh_path}"
+""")
+                os.chmod(sh_path, 0o755)
+                subprocess.Popen(["/bin/bash", sh_path])
+                InfoBar.success("更新中", "程序将自动重启", parent=self, position=InfoBarPosition.TOP)
+                QTimer.singleShot(500, sys.exit)
             else:
                 # 源码运行，打开下载目录
                 os.system(f'open "{os.path.dirname(download_path)}"')
         else:
-            # macOS: 打开DMG让用户拖拽安装
-            os.system(f'open "{download_path}"')
+            os.system(f'open "{os.path.dirname(download_path)}"')
 
     def _load_saved_config(self):
         """加载保存的配置，返回是否有完整配置"""
