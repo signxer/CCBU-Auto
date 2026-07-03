@@ -653,6 +653,18 @@ class AutoLearner:
                     if "/sys/#/login" in current_url:
                         # 检查是否有错误提示
                         try:
+                            # 检查页面上的错误文字（密码错误、认证失败等）
+                            body_text = await page.locator("body").inner_text(timeout=2000)
+                            for err_msg in ["用户认证失败", "认证失败", "密码错误", "账号或密码", "请检查"]:
+                                if err_msg in body_text:
+                                    console.print(f"[red]登录失败: {err_msg}[/red]")
+                                    login_failed = True
+                                    break
+                            if login_failed:
+                                break
+                        except:
+                            pass
+                        try:
                             err = page.locator(".el-message--error, .el-form-item__error, [class*=error]")
                             err_text = await err.first.inner_text(timeout=1500)
                             if err_text:
@@ -769,6 +781,14 @@ class AutoLearner:
                                     break
                                 break
                             # 检查错误
+                            try:
+                                body_text = await page.locator("body").inner_text(timeout=2000)
+                                for err_msg in ["用户认证失败", "认证失败", "密码错误", "账号或密码", "请检查"]:
+                                    if err_msg in body_text:
+                                        console.print(f"[red]重试失败: {err_msg}[/red]")
+                                        break
+                            except:
+                                pass
                             try:
                                 e = page.locator(".el-message--error, .el-form-item__error")
                                 t = await e.first.inner_text(timeout=1500)
@@ -905,6 +925,15 @@ class AutoLearner:
                 logged_in = False
                 for i in range(60):
                     await asyncio.sleep(1)
+                    # 检查密码错误
+                    try:
+                        body = await page.locator("body").inner_text(timeout=2000)
+                        for err_msg in ["用户认证失败", "认证失败", "密码错误", "账号或密码", "请检查"]:
+                            if err_msg in body:
+                                _log(f"登录失败: {err_msg}", "red")
+                                return
+                    except:
+                        pass
                     if "/sys/#/login" not in page.url:
                         try:
                             await page.goto("https://u.ccb.com/portal/#/study",
