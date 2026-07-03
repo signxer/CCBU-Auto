@@ -343,8 +343,12 @@ class CCBULearner:
         """检查是否已登录 - 通过页面真实DOM状态检测"""
         try:
             console.print("正在检查登录状态...", style="blue")
-            await page.goto("https://u.ccb.com/portal/#/study",
-                            wait_until="domcontentloaded", timeout=30000)
+            try:
+                await page.goto("https://u.ccb.com/portal/#/study",
+                                wait_until="networkidle", timeout=20000)
+            except:
+                await page.goto("https://u.ccb.com/portal/#/study",
+                                wait_until="domcontentloaded", timeout=15000)
             # SPA 可能需要额外时间渲染，等待关键元素出现
             await page.wait_for_timeout(5000)
             
