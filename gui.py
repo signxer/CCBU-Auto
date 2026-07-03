@@ -1287,6 +1287,10 @@ class DashboardScreen(QWidget):
                             "https://u.ccb.com/workshop/#/index?collegeId=&departmentId=&orderby=praise",
                             wait_until="domcontentloaded", timeout=20000)
                         await _list_page.wait_for_timeout(5000)
+                        # 应用标签筛选
+                        if cfg_tags:
+                            await learner.filter_by_tags(_list_page)
+                            await _list_page.wait_for_timeout(3000)
                     except:
                         pass
 
