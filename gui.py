@@ -93,16 +93,19 @@ REPO_NAME = "signxer/silent-rain"
 
 def check_for_update():
     """检查是否有新版本，返回 (最新版本号, 是否需要更新, 更新日志, 下载URL)"""
-    try:
-        req = urllib.request.Request(
-            RELEASES_JSON_URL,
-            headers={"User-Agent": "Moisten"}
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
+    data = None
+    # 先试直连，失败走代理
+    for url in [RELEASES_JSON_URL, f"https://gh-proxy.com/{RELEASES_JSON_URL}"]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Moisten"})
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = json.loads(resp.read().decode())
+                break
+        except:
+            continue
+    if data:
         latest = data.get("tag", "").lstrip("v")
         notes = data.get("notes", "")
-        # 构建下载URL
         download_urls = {}
         for asset in data.get("assets", []):
             name = asset.get("name", "")
@@ -111,8 +114,6 @@ def check_for_update():
                 download_urls[name] = f"https://github.com/{REPO_NAME}/releases/download/{data.get('tag', '')}/{fname}"
         if latest and latest != CURRENT_VERSION:
             return latest, True, notes, download_urls
-    except:
-        pass
     return CURRENT_VERSION, False, "", {}
 
 
@@ -844,6 +845,11 @@ class DashboardScreen(QWidget):
         self.lbl_mode = CaptionLabel("")
         self.lbl_mode.setStyleSheet("padding: 2px 8px; border-radius: 4px; background: rgba(128,128,128,0.1);")
         header.addWidget(self.lbl_mode)
+
+        btn_update = ToolButton(FIF.DOWNLOAD)
+        btn_update.setToolTip("检查更新")
+        btn_update.clicked.connect(self._check_update_manual)
+        header.addWidget(btn_update)
 
         btn_settings = ToolButton(FIF.SETTING)
         btn_settings.setToolTip("设置")
@@ -1580,6 +1586,24 @@ class DashboardScreen(QWidget):
     def _on_done(self, success, failed):
         self._eta_timer.stop()
         InfoBar.success("完成", f"学习流程结束，成功 {success} 门", parent=self, position=InfoBarPosition.TOP_RIGHT)
+
+    def _check_update_manual(self):
+        """手动检查更新"""
+        try:
+            latest, needs_update, notes, download_urls = check_for_update()
+            if needs_update:
+                msg = f"当前版本: v{CURRENT_VERSION}\n最新版本: v{latest}"
+                if notes:
+                    msg += f"\n\n更新内容:\n{notes}"
+                dlg = Dialog("发现新版本", msg, self)
+                dlg.cancelButton.setText("稍后")
+                dlg.yesButton.setText("立即更新")
+                if dlg.exec():
+                    self.window()._do_update(download_urls)
+            else:
+                InfoBar.success("检查更新", f"已是最新版本 v{CURRENT_VERSION}", parent=self, position=InfoBarPosition.TOP_RIGHT)
+        except Exception as e:
+            InfoBar.error("检查失败", str(e), parent=self, position=InfoBarPosition.TOP_RIGHT)
 
     def _on_tag_request(self, tags_by_category):
         from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QScrollArea, QWidget
