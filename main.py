@@ -1673,10 +1673,19 @@ class AutoLearner:
 
         api_url = f"https://api.u.ccb.com/v1/workshop/users/workshops/v2/{ws_id}"
 
-        # fetch代码（从页面上下文取token后调API）
+        # 先从主页面读取token（保证有有效的认证信息）
+        _token = ""
+        try:
+            _token = await self.pages[0].evaluate(
+                "() => { try { return localStorage.getItem('token') || ''; } catch(e) { return ''; } }"
+            )
+        except:
+            pass
+
+        # fetch代码（优先用预读的token，否则从当前页面取）
         fetch_code = """(url) => {
-            let token = '';
-            try { token = localStorage.getItem('token') || ''; } catch(e) {}
+            let token = '""" + _token + """';
+            if (!token) try { token = localStorage.getItem('token') || ''; } catch(e) {}
             if (!token) try { token = sessionStorage.getItem('token') || ''; } catch(e) {}
             if (!token) try { token = window.__token__ || ''; } catch(e) {}
             if (!token) try {
