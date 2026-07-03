@@ -2356,188 +2356,169 @@ class AutoLearner:
                     _log(f"  ⊘ 已完成，跳过: {ws_title[:30]}", "green")
                     return None
 
-                # 每个专题班创建新页面（避免SPA状态累积导致后面失败）
+                # 直接用传入的页面（已认证），导航到专题班详情页
+                ws_url = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
                 try:
-                    cp = await self.context.new_page()
+                    await cp.goto(ws_url, wait_until="domcontentloaded", timeout=20000)
+                    await cp.wait_for_timeout(6000)
                 except:
                     pass
+
+                body_text = ""
                 try:
-                    # 先访问主站加载token到localStorage（API需要）
+                    body_text = await cp.locator("body").inner_text(timeout=3000)
+                except:
+                    pass
+
+                # 检查是否报名截止（列表页已过滤，这里兜底）
+                if "报名截止" in body_text or "报名已结束" in body_text:
+                    _log(f"  ⊘ 报名已截止，跳过: {ws_title[:30]}", "yellow")
+                    return None
+
+                # 先检查是否需要报名（必须先报名才能看到课程，否则API会400）
+                need_enroll = False
+                for kw in ["立即报名", "加入学习", "免费报名"]:
                     try:
-                        await cp.goto("https://u.ccb.com/portal/#/study",
-                                      wait_until="domcontentloaded", timeout=15000)
-                        await cp.wait_for_timeout(3000)
-                    except:
-                        pass
-
-                    # 导航到专题班详情页
-                    ws_url = f"https://u.ccb.com/workshop/#/myworkshop/detail?id={ws_id}"
-                    try:
-                        await cp.goto(ws_url, wait_until="domcontentloaded", timeout=20000)
-                        await cp.wait_for_timeout(6000)
-                    except:
-                        pass
-
-                    body_text = ""
-                    try:
-                        body_text = await cp.locator("body").inner_text(timeout=3000)
-                    except:
-                        pass
-
-                    # 检查是否报名截止（列表页已过滤，这里兜底）
-                    if "报名截止" in body_text or "报名已结束" in body_text:
-                        _log(f"  ⊘ 报名已截止，跳过: {ws_title[:30]}", "yellow")
-                        return None
-
-                    # 先检查是否需要报名（必须先报名才能看到课程，否则API会400）
-                    need_enroll = False
-                    for kw in ["立即报名", "加入学习", "免费报名"]:
-                        try:
-                            btn = cp.locator(f"text={kw}").first
-                            if await btn.count() > 0 and await btn.is_visible():
-                                _log(f"  需要报名，点击「{kw}」", "blue")
-                                old_url = cp.url
-                                await btn.click()
-                                for _ in range(10):
-                                    await cp.wait_for_timeout(2000)
-                                    if cp.url != old_url:
-                                        break
-                                    try:
-                                        if not await cp.locator(f"text={kw}").first.is_visible(timeout=1000):
-                                            break
-                                    except:
-                                        break
-                                await cp.wait_for_load_state("networkidle", timeout=15000)
-                                await cp.wait_for_timeout(3000)
-                                need_enroll = True
-                                break
-                        except:
-                            pass
-
-                    # 报名后重新导航到详情页，等服务器处理
-                    if need_enroll:
-                        try:
-                            await cp.goto(ws_url, wait_until="domcontentloaded", timeout=15000)
-                            await cp.wait_for_timeout(5000)
-                        except:
-                            pass
-                    else:
-                        # 未报名的也点课程标签（已报名的跳过，直接API采集）
-                        for tab_text in ["课程", "课程列表", "课程目录"]:
-                            try:
-                                tab = cp.locator(f"text={tab_text}").first
-                                if await tab.count() > 0 and await tab.is_visible():
-                                    await tab.click()
-                                    await cp.wait_for_timeout(3000)
+                        btn = cp.locator(f"text={kw}").first
+                        if await btn.count() > 0 and await btn.is_visible():
+                            _log(f"  需要报名，点击「{kw}」", "blue")
+                            old_url = cp.url
+                            await btn.click()
+                            for _ in range(10):
+                                await cp.wait_for_timeout(2000)
+                                if cp.url != old_url:
                                     break
-                            except:
-                                pass
-
-                        # 等待课程表格加载
-                        for _wait in range(3):
-                            row_count = await cp.locator("tr.text-center").count()
-                            if row_count > 0:
-                                break
-                            page_text = ""
-                            try:
-                                page_text = await cp.locator("body").inner_text(timeout=2000)
-                            except:
-                                pass
-                            if "NaN" in page_text or "总课程门" in page_text:
-                                debug(f"  表格数据未加载，等待刷新({_wait+1}/3)")
-                                await cp.wait_for_timeout(5000)
-                            else:
-                                break
-
-                    # 获取课程列表：API重试（最多5次，递增等待，400不重试）
-                    courses = []
-                    API_MAX_RETRIES = 5
-                    api_gave_up = False
-                    for api_attempt in range(API_MAX_RETRIES):
-                        if api_attempt > 0:
-                            wait_sec = api_attempt * 3
-                            _log(f"  API重试({api_attempt}/{API_MAX_RETRIES})，等{wait_sec}秒...", "yellow")
-                            await asyncio.sleep(wait_sec)
-                        try:
-                            api_result = await self._get_courses_by_api(cp, ws_id, log_callback=_log)
-                            # api_result为None表示400等不可恢复错误，不重试
-                            if api_result is None:
-                                api_gave_up = True
-                                break
-                            if api_result and isinstance(api_result, dict):
-                                data = api_result.get("contentList", [])
-                                if not data:
-                                    for key in ["courses", "knowledgeList", "courseList", "lessons"]:
-                                        val = api_result.get(key)
-                                        if isinstance(val, list) and len(val) > 0:
-                                            data = val
-                                            break
-                                if data and isinstance(data, list):
-                                    for item in data:
-                                        if not isinstance(item, dict):
-                                            continue
-                                        title = str(item.get("knowledgeName", item.get("title",
-                                            item.get("courseName", item.get("name", "")))))
-                                        ctype = str(item.get("kngType", item.get("type", "")))
-                                        if ctype in ("考试", "scorm", "ExamKnowledge", "ScormKnowledge"):
-                                            continue
-                                        if not title or len(title) <= 3:
-                                            continue
-                                        progress_val = item.get("progress", 0)
-                                        hours_val = item.get("hours", 0)
-                                        detail_url = item.get("kngDetailUrl", "")
-                                        course_id = item.get("knowledgeId", item.get("id", ""))
-                                        courses.append({
-                                            "title": title.strip(),
-                                            "type": ctype.strip(),
-                                            "required": "必修" if item.get("type") == 1 else "选修",
-                                            "hours": str(hours_val),
-                                            "progress": f"{float(progress_val)*100:.0f}%" if progress_val else "0%",
-                                            "action": "已学习" if progress_val and float(progress_val) >= 1 else "未学习",
-                                            "url": detail_url or course_id,
-                                        })
-                                    if courses:
-                                        _log(f"  ✓ API获取 {len(courses)} 门课程", "green")
+                                try:
+                                    if not await cp.locator(f"text={kw}").first.is_visible(timeout=1000):
                                         break
-                                    else:
-                                        _log(f"  API返回0门课程", "yellow")
-                                else:
-                                    _log(f"  API无课程数据", "yellow")
-                            else:
-                                _log(f"  API返回异常", "yellow")
-                        except Exception as e:
-                            _log(f"  API异常: {e}", "red")
-
-                    if courses is None:
-                        courses = []
-
-                    if courses:
-                        to_learn = [(i, c) for i, c in enumerate(courses)
-                                    if self._is_learnable(c.get('action', ''), c.get('hours', ''))]
-                        action_vals = set(c.get('action', '') for c in courses)
-                        debug(f"  课程action值: {action_vals}, 待学: {len(to_learn)}")
-                        if not to_learn:
-                            if ws_id not in completed_ids:
-                                completed_ids.add(ws_id)
-                                self.mark_workshop_completed(ws_id)
-                                debug(f"  标记已完成: {ws_id}")
-                            _log(f"  ✓ 全部已完成（共{len(courses)}门）", "green")
-                        else:
-                            _log(f"  ✓ {len(to_learn)} 门待学（共{len(courses)}门）", "green")
-                        return {
-                            "ws_id": ws_id,
-                            "ws_title": ws_title,
-                            "tasks": [(ws_id, ci, c, ws_title) for ci, c in to_learn],
-                            "courses": courses
-                        }
-                    else:
-                        _log(f"  ✗ 未获取到课程", "yellow")
-                        return None
-                finally:
-                    try:
-                        await cp.close()
+                                except:
+                                    break
+                            await cp.wait_for_load_state("networkidle", timeout=15000)
+                            await cp.wait_for_timeout(3000)
+                            need_enroll = True
+                            break
                     except:
                         pass
+
+                # 报名后重新导航到详情页，等服务器处理
+                if need_enroll:
+                    try:
+                        await cp.goto(ws_url, wait_until="domcontentloaded", timeout=15000)
+                        await cp.wait_for_timeout(5000)
+                    except:
+                        pass
+                else:
+                    # 未报名的也点课程标签（已报名的跳过，直接API采集）
+                    for tab_text in ["课程", "课程列表", "课程目录"]:
+                        try:
+                            tab = cp.locator(f"text={tab_text}").first
+                            if await tab.count() > 0 and await tab.is_visible():
+                                await tab.click()
+                                await cp.wait_for_timeout(3000)
+                                break
+                        except:
+                            pass
+
+                    # 等待课程表格加载
+                    for _wait in range(3):
+                        row_count = await cp.locator("tr.text-center").count()
+                        if row_count > 0:
+                            break
+                        page_text = ""
+                        try:
+                            page_text = await cp.locator("body").inner_text(timeout=2000)
+                        except:
+                            pass
+                        if "NaN" in page_text or "总课程门" in page_text:
+                            debug(f"  表格数据未加载，等待刷新({_wait+1}/3)")
+                            await cp.wait_for_timeout(5000)
+                        else:
+                            break
+
+                # 获取课程列表：API重试（最多5次，递增等待，400不重试）
+                courses = []
+                API_MAX_RETRIES = 5
+                api_gave_up = False
+                for api_attempt in range(API_MAX_RETRIES):
+                    if api_attempt > 0:
+                        wait_sec = api_attempt * 3
+                        _log(f"  API重试({api_attempt}/{API_MAX_RETRIES})，等{wait_sec}秒...", "yellow")
+                        await asyncio.sleep(wait_sec)
+                    try:
+                        api_result = await self._get_courses_by_api(cp, ws_id, log_callback=_log)
+                        # api_result为None表示400等不可恢复错误，不重试
+                        if api_result is None:
+                            api_gave_up = True
+                            break
+                        if api_result and isinstance(api_result, dict):
+                            data = api_result.get("contentList", [])
+                            if not data:
+                                for key in ["courses", "knowledgeList", "courseList", "lessons"]:
+                                    val = api_result.get(key)
+                                    if isinstance(val, list) and len(val) > 0:
+                                        data = val
+                                        break
+                            if data and isinstance(data, list):
+                                for item in data:
+                                    if not isinstance(item, dict):
+                                        continue
+                                    title = str(item.get("knowledgeName", item.get("title",
+                                        item.get("courseName", item.get("name", "")))))
+                                    ctype = str(item.get("kngType", item.get("type", "")))
+                                    if ctype in ("考试", "scorm", "ExamKnowledge", "ScormKnowledge"):
+                                        continue
+                                    if not title or len(title) <= 3:
+                                        continue
+                                    progress_val = item.get("progress", 0)
+                                    hours_val = item.get("hours", 0)
+                                    detail_url = item.get("kngDetailUrl", "")
+                                    course_id = item.get("knowledgeId", item.get("id", ""))
+                                    courses.append({
+                                        "title": title.strip(),
+                                        "type": ctype.strip(),
+                                        "required": "必修" if item.get("type") == 1 else "选修",
+                                        "hours": str(hours_val),
+                                        "progress": f"{float(progress_val)*100:.0f}%" if progress_val else "0%",
+                                        "action": "已学习" if progress_val and float(progress_val) >= 1 else "未学习",
+                                        "url": detail_url or course_id,
+                                    })
+                                if courses:
+                                    _log(f"  ✓ API获取 {len(courses)} 门课程", "green")
+                                    break
+                                else:
+                                    _log(f"  API返回0门课程", "yellow")
+                            else:
+                                _log(f"  API无课程数据", "yellow")
+                        else:
+                            _log(f"  API返回异常", "yellow")
+                    except Exception as e:
+                        _log(f"  API异常: {e}", "red")
+
+                if courses is None:
+                    courses = []
+
+                if courses:
+                    to_learn = [(i, c) for i, c in enumerate(courses)
+                                if self._is_learnable(c.get('action', ''), c.get('hours', ''))]
+                    action_vals = set(c.get('action', '') for c in courses)
+                    debug(f"  课程action值: {action_vals}, 待学: {len(to_learn)}")
+                    if not to_learn:
+                        if ws_id not in completed_ids:
+                            completed_ids.add(ws_id)
+                            self.mark_workshop_completed(ws_id)
+                            debug(f"  标记已完成: {ws_id}")
+                        _log(f"  ✓ 全部已完成（共{len(courses)}门）", "green")
+                    else:
+                        _log(f"  ✓ {len(to_learn)} 门待学（共{len(courses)}门）", "green")
+                    return {
+                        "ws_id": ws_id,
+                        "ws_title": ws_title,
+                        "tasks": [(ws_id, ci, c, ws_title) for ci, c in to_learn],
+                        "courses": courses
+                    }
+                else:
+                    _log(f"  ✗ 未获取到课程", "yellow")
+                    return None
 
         # 并行执行所有采集任务
         console.print(f"\n开始并行采集 {len(to_process)} 个专题班...", style="bold blue")
