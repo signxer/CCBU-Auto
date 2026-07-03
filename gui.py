@@ -1322,6 +1322,13 @@ class DashboardScreen(QWidget):
                                 return 0
                             page_num += 1
                             await _list_page.wait_for_timeout(5000)
+                            # 先应用标签筛选
+                            if cfg_tags:
+                                try:
+                                    await learner.filter_by_tags(_list_page)
+                                    await _list_page.wait_for_timeout(3000)
+                                except:
+                                    pass
                             # 从列表页获取专题班
                             try:
                                 new_ws = await learner.get_workshops(_list_page)
@@ -1333,14 +1340,6 @@ class DashboardScreen(QWidget):
                                 no_more_pages = True
                                 return 0
                             log(f"自动翻到第 {page_num} 页: {len(new_ws)} 个专题班", "blue")
-                            # 应用标签筛选
-                            if cfg_tags:
-                                try:
-                                    await learner.filter_by_tags(_list_page)
-                                    await _list_page.wait_for_timeout(3000)
-                                    new_ws = await learner.get_workshops(_list_page)
-                                except:
-                                    pass
                             learner.save_progress(completed_ids, page_num, 0)
                             # 用独立页面采集课程
                             try:
