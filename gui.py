@@ -847,7 +847,8 @@ class DashboardScreen(QWidget):
         # Header
         header = QHBoxLayout()
         header.setSpacing(8)
-        title = StrongBodyLabel("润物 Moisten")
+        title = QLabel(f'润物 Moisten <span style="font-size:12px;color:#888;">v{CURRENT_VERSION}</span>')
+        title.setTextFormat(Qt.RichText)
         title.setStyleSheet("font-size: 18px; font-weight: bold;")
         header.addWidget(title)
         header.addStretch()
