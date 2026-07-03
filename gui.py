@@ -846,7 +846,7 @@ class DashboardScreen(QWidget):
         self.lbl_mode.setStyleSheet("padding: 2px 8px; border-radius: 4px; background: rgba(128,128,128,0.1);")
         header.addWidget(self.lbl_mode)
 
-        btn_update = ToolButton(FIF.DOWNLOAD)
+        btn_update = ToolButton(FIF.CLOUD)
         btn_update.setToolTip("检查更新")
         btn_update.clicked.connect(self._check_update_manual)
         header.addWidget(btn_update)
