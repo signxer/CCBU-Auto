@@ -996,6 +996,7 @@ class DashboardScreen(QWidget):
             self.lbl_mode.setText("自动模式")
             self.lbl_mode.setStyleSheet("padding: 2px 8px; border-radius: 4px; background: rgba(16,124,16,0.15); color: #107c10;")
 
+        self._learner = None  # 保存learner引用用于退出时清理
         self._worker = AsyncThread(self._run_learning, self)
         self._worker.log_signal.connect(self._on_log)
         self._worker.progress_signal.connect(self._on_progress)
@@ -1063,6 +1064,7 @@ class DashboardScreen(QWidget):
             cfg_chrome_path = getattr(win, "cfg_chrome_path", "")
             log("正在初始化浏览器...")
             learner = AutoLearner(headless=cfg_headless, workers=cfg_workers, browser=cfg_browser)
+            self._learner = learner  # 保存引用用于退出时清理
             await learner.init(log_callback=log, chrome_path=cfg_chrome_path)
             log("浏览器初始化完成", "green")
 
@@ -1893,11 +1895,21 @@ else:
 
 class MainWindow(_BaseWindow):
     def closeEvent(self, event):
-        """关闭窗口时二次确认"""
+        """关闭窗口时二次确认并清理资源"""
         dlg = Dialog("确认退出", "确定要退出吗？学习进度会自动保存。", self)
         dlg.cancelButton.setText("取消")
         dlg.yesButton.setText("退出")
         if dlg.exec():
+            # 清理浏览器
+            try:
+                learner = self.screen_dashboard._learner
+                if learner:
+                    import asyncio
+                    loop = asyncio.new_event_loop()
+                    loop.run_until_complete(learner.close())
+                    loop.close()
+            except:
+                pass
             event.accept()
         else:
             event.ignore()
