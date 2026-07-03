@@ -1975,7 +1975,15 @@ class MainWindow(_BaseWindow):
                 filename = url.split("/")[-1]
                 download_path = os.path.join(tempfile.gettempdir(), filename)
 
-                req = urllib.request.Request(url, headers={"User-Agent": "Moisten"})
+                # 先试直连，失败则用 GitHub 代理
+                download_url = url
+                try:
+                    req = urllib.request.Request(url, headers={"User-Agent": "Moisten"}, method="HEAD")
+                    urllib.request.urlopen(req, timeout=10)
+                except:
+                    download_url = f"https://gh-proxy.com/{url}"
+
+                req = urllib.request.Request(download_url, headers={"User-Agent": "Moisten"})
                 with urllib.request.urlopen(req, timeout=300) as resp:
                     total = int(resp.headers.get("Content-Length", 0))
                     downloaded = 0
