@@ -2011,16 +2011,32 @@ class MainWindow(_BaseWindow):
             return
 
         # 下载进度对话框（Fluent 风格）
-        dlg = Dialog("正在更新", "正在下载新版本...", self)
-        dlg.cancelButton.hide()
-        dlg.yesButton.hide()
+        dlg = QDialog(self)
+        dlg.setWindowTitle("正在更新")
         dlg.setMinimumWidth(400)
+        dlg.setWindowFlags(dlg.windowFlags() & ~Qt.WindowContextHelpButtonHint)
+
+        layout = QVBoxLayout(dlg)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        lbl_title = SubtitleLabel("正在下载新版本...")
+        layout.addWidget(lbl_title)
 
         progress_bar = ProgressBar()
         progress_bar.setValue(0)
+        layout.addWidget(progress_bar)
+
         lbl_status = BodyLabel("准备下载...")
-        dlg.textLayout.addWidget(progress_bar)
-        dlg.textLayout.addWidget(lbl_status)
+        layout.addWidget(lbl_status)
+
+        btn_cancel = PushButton("取消")
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(btn_cancel)
+        layout.addLayout(btn_row)
+
+        cancel_flag = [False]
 
         def do_download():
             try:
@@ -2028,7 +2044,6 @@ class MainWindow(_BaseWindow):
                 filename = url.split("/")[-1]
                 download_path = os.path.join(tempfile.gettempdir(), filename)
 
-                # 先试直连，失败则用 GitHub 代理
                 download_url = url
                 try:
                     req = urllib.request.Request(url, headers={"User-Agent": "Moisten"}, method="HEAD")
@@ -2042,6 +2057,9 @@ class MainWindow(_BaseWindow):
                     downloaded = 0
                     with open(download_path, "wb") as f:
                         while True:
+                            if cancel_flag[0]:
+                                os.remove(download_path)
+                                return
                             chunk = resp.read(8192)
                             if not chunk:
                                 break
@@ -2055,7 +2073,6 @@ class MainWindow(_BaseWindow):
                                 QMetaObject.invokeMethod(progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, pct))
                                 QMetaObject.invokeMethod(lbl_status, "setText", Qt.QueuedConnection, Q_ARG(str, f"已下载 {size_mb:.1f} / {total_mb:.1f} MB ({pct}%)"))
 
-                # 下载完成
                 QMetaObject.invokeMethod(lbl_status, "setText", Qt.QueuedConnection, Q_ARG(str, "下载完成，正在安装..."))
                 QMetaObject.invokeMethod(progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, 100))
                 self._apply_update(download_path)
@@ -2064,6 +2081,7 @@ class MainWindow(_BaseWindow):
                 QMetaObject.invokeMethod(dlg, "reject", Qt.QueuedConnection)
                 InfoBar.error("更新失败", str(e), parent=self, position=InfoBarPosition.TOP)
 
+        btn_cancel.clicked.connect(lambda: (cancel_flag.__setitem__(0, True), dlg.reject()))
         dlg.show()
         import threading
         threading.Thread(target=do_download, daemon=True).start()
