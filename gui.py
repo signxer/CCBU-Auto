@@ -35,7 +35,7 @@ from qfluentwidgets import (
     isDarkTheme, setTheme, Theme,
 )
 
-from main import CCBULearner, CONFIG_PATH, PROGRESS_PATH, STORAGE_STATE_PATH, USER_CREDENTIALS_PATH
+from main import AutoLearner, CONFIG_PATH, PROGRESS_PATH, STORAGE_STATE_PATH, USER_CREDENTIALS_PATH
 
 
 # ─── Async Thread ──────────────────────────────────────────────────
@@ -293,8 +293,8 @@ class LoginScreen(QWidget):
                 # 解密密码
                 if self._creds.get("password"):
                     try:
-                        from main import CCBULearner
-                        self._creds["password"] = CCBULearner._xor_decrypt(self._creds["password"])
+                        from main import AutoLearner
+                        self._creds["password"] = AutoLearner._xor_decrypt(self._creds["password"])
                     except:
                         pass  # 兼容旧的明文密码
             except:
@@ -309,7 +309,7 @@ class LoginScreen(QWidget):
         title = TitleLabel("用户登录")
         layout.addWidget(title)
 
-        subtitle = BodyLabel("输入建行统一认证账号密码")
+        subtitle = BodyLabel("输入统一认证账号密码")
         subtitle.setStyleSheet("color: #888;")
         layout.addWidget(subtitle)
 
@@ -384,8 +384,8 @@ class LoginScreen(QWidget):
             return
 
         try:
-            from main import CCBULearner
-            CCBULearner().save_user_credentials(username, password)
+            from main import AutoLearner
+            AutoLearner().save_user_credentials(username, password)
         except:
             pass
 
@@ -608,8 +608,8 @@ class GoalScreen(QWidget):
         # 差额模式：立即算出绝对目标，存为target模式，避免重启后重复叠加
         # 需要查询当前学时来计算
         try:
-            from main import CCBULearner
-            tmp = CCBULearner(headless=True, workers=1)
+            from main import AutoLearner
+            tmp = AutoLearner(headless=True, workers=1)
             # 同步获取学时（简化处理，用已保存的值或0）
             cfg_old = {}
             if os.path.exists(CONFIG_PATH):
@@ -1068,7 +1068,7 @@ class DashboardScreen(QWidget):
             cfg_browser = getattr(win, "cfg_browser", "chromium")
             cfg_chrome_path = getattr(win, "cfg_chrome_path", "")
             log("正在初始化浏览器...")
-            learner = CCBULearner(headless=cfg_headless, workers=cfg_workers, browser=cfg_browser)
+            learner = AutoLearner(headless=cfg_headless, workers=cfg_workers, browser=cfg_browser)
             await learner.init(log_callback=log, chrome_path=cfg_chrome_path)
             log("浏览器初始化完成", "green")
 
@@ -1969,8 +1969,8 @@ class MainWindow(_BaseWindow):
                 # 解密密码
                 if self.cfg_password:
                     try:
-                        from main import CCBULearner
-                        self.cfg_password = CCBULearner._xor_decrypt(self.cfg_password)
+                        from main import AutoLearner
+                        self.cfg_password = AutoLearner._xor_decrypt(self.cfg_password)
                     except:
                         pass
             return bool(self.cfg_username)

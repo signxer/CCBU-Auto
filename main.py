@@ -95,7 +95,7 @@ def init_debug_log():
     # 清空调试日志
     try:
         with open(DEBUG_LOG, "w", encoding="utf-8") as f:
-            f.write(f"=== CCBU-Auto Debug Log ===\n")
+            f.write(f"=== Moisten Debug Log ===\n")
     except:
         pass
 
@@ -165,7 +165,7 @@ async def async_input(prompt: str, default: str = "y", timeout: int = 5,
         return default
 
 
-class CCBULearner:
+class AutoLearner:
     def __init__(self, headless: bool = False, workers: int = 1, browser: str = "chromium"):
         self.headless = headless
         self.workers = workers
@@ -484,7 +484,7 @@ class CCBULearner:
             await self._do_login(page, username, password, auto_login, _log)
             return
 
-        console.print("建行学习自动登录", style="bold blue")
+        console.print("自动登录", style="bold blue")
         if await self.check_login_status(page):
             # 显示当前用户并询问是否切换
             try:
@@ -555,7 +555,7 @@ class CCBULearner:
             else:
                 # 自动登录模式
                 console.print()
-                username = await async_input("请输入建行统一认证账号", default="", timeout=300, block=True, raw=True)
+                username = await async_input("请输入统一认证账号", default="", timeout=300, block=True, raw=True)
                 # 密码也用async_input，避免和stdin线程冲突
                 password = await async_input("请输入密码", default="", timeout=300, block=True, raw=True, password=True)
                 
@@ -3363,7 +3363,7 @@ def start(headless, workers, target_hours, tags):
         config_table.add_row("无头模式", "是" if _h else "否")
         console.print(Panel(config_table, title="[bold]运行配置[/bold]", border_style="blue"))
 
-        learner = CCBULearner(headless=_h, workers=_w)
+        learner = AutoLearner(headless=_h, workers=_w)
         learner.target_hours = target_hours
         learner.tags_to_learn = list(tags)
 
@@ -3606,7 +3606,7 @@ def start(headless, workers, target_hours, tags):
 def hours():
     """查看当前学时"""
     async def run():
-        learner = CCBULearner(headless=False)
+        learner = AutoLearner(headless=False)
         try:
             await learner.init()
             await learner.login()

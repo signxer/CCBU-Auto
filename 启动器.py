@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""润物细无声 CCBU-Auto 启动器"""
+"""润物 Moisten 启动器"""
 import os
 import sys
 import subprocess
@@ -17,7 +17,7 @@ def log(msg):
 def show_error(msg):
     """macOS 弹窗显示错误"""
     try:
-        subprocess.run(["osascript", "-e", f'display dialog "{msg}" with title "CCBU-Auto" buttons {{"OK"}}'])
+        subprocess.run(["osascript", "-e", f'display dialog "{msg}" with title "Moisten" buttons {{"OK"}}'])
     except:
         pass
 
