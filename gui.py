@@ -2010,11 +2010,17 @@ class MainWindow(_BaseWindow):
             webbrowser.open(DOWNLOAD_URL)
             return
 
-        # 下载进度对话框
-        progress = QProgressDialog("正在下载更新...", "取消", 0, 100, self)
-        progress.setWindowTitle("更新中")
-        progress.setWindowModality(Qt.WindowModal)
-        progress.show()
+        # 下载进度对话框（Fluent 风格）
+        dlg = Dialog("正在更新", "正在下载新版本...", self)
+        dlg.cancelButton.hide()
+        dlg.yesButton.hide()
+        dlg.setMinimumWidth(400)
+
+        progress_bar = ProgressBar()
+        progress_bar.setValue(0)
+        lbl_status = BodyLabel("准备下载...")
+        dlg.textLayout.addWidget(progress_bar)
+        dlg.textLayout.addWidget(lbl_status)
 
         def do_download():
             try:
@@ -2043,18 +2049,22 @@ class MainWindow(_BaseWindow):
                             downloaded += len(chunk)
                             if total > 0:
                                 pct = int(downloaded / total * 100)
-                                # 信号更新进度（跨线程）
+                                size_mb = downloaded / 1024 / 1024
+                                total_mb = total / 1024 / 1024
                                 from PySide6.QtCore import QMetaObject, Q_ARG
-                                QMetaObject.invokeMethod(progress, "setValue", Qt.QueuedConnection, Q_ARG(int, pct))
+                                QMetaObject.invokeMethod(progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, pct))
+                                QMetaObject.invokeMethod(lbl_status, "setText", Qt.QueuedConnection, Q_ARG(str, f"已下载 {size_mb:.1f} / {total_mb:.1f} MB ({pct}%)"))
 
-                # 下载完成，替换自己
+                # 下载完成
+                QMetaObject.invokeMethod(lbl_status, "setText", Qt.QueuedConnection, Q_ARG(str, "下载完成，正在安装..."))
+                QMetaObject.invokeMethod(progress_bar, "setValue", Qt.QueuedConnection, Q_ARG(int, 100))
                 self._apply_update(download_path)
 
             except Exception as e:
+                QMetaObject.invokeMethod(dlg, "reject", Qt.QueuedConnection)
                 InfoBar.error("更新失败", str(e), parent=self, position=InfoBarPosition.TOP)
-            finally:
-                progress.close()
 
+        dlg.show()
         import threading
         threading.Thread(target=do_download, daemon=True).start()
 
