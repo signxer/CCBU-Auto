@@ -665,8 +665,8 @@ class CCBULearner:
                     
                     # 导航到study页面做最终确认
                     await page.goto("https://u.ccb.com/portal/#/study",
-                                    wait_until="networkidle", timeout=15000)
-                    await page.wait_for_timeout(3000)
+                                    wait_until="domcontentloaded", timeout=15000)
+                    await page.wait_for_timeout(5000)
                     
                     # 用和check_login_status相同的逻辑做最终验证
                     final_url = page.url
